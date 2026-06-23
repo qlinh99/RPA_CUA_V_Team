@@ -7,6 +7,25 @@ Kiến trúc tách 4 mảnh — đổi đích chỉ thay mảnh "soi" + "điền
 ① soi đích → schema trường   ②/③ OCR + trích xuất (dùng chung)   ④ điền
 ```
 
+## Cấu trúc thư mục
+
+```
+rpa_hoadon/
+├─ *.py              ← TẤT CẢ code phẳng ở root (import nhau như module top-level;
+│                      mọi script chạy trực tiếp `py -3.11 <file>.py`). KHÔNG tách thư mục con.
+├─ README.md         ← tài liệu chính (file này)
+├─ requirements.txt
+├─ profiles/         ← profile đa-app (access.json, _template.json)
+├─ docs/             ← PROJECT_STATE.md · TODO.md · DECISIONS.md · DEMO.md
+├─ reports/          ← bao_cao_3_bac.html · tool_flowchart.html
+├─ screenshots/      ← bằng chứng chạy (gitignore)
+└─ _tmp/, form_cache/, *.xlsx, *.accdb  ← file tạm/sinh ra (gitignore)
+```
+
+> **Vì sao code không tách thư mục con?** Các `.py` import nhau phẳng và `_bootstrap`
+> tính đường dẫn `.env`/engine OCR theo `HERE.parent`. Tách ra sẽ phá mọi import +
+> lệnh README. Layout phẳng là đúng cho bộ "script chạy trực tiếp dùng chung module".
+
 ## 1 lệnh — 5 đích (`autofill.py`)
 
 | Đích | Cờ | Cơ chế | Bậc |

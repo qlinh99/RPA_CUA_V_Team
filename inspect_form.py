@@ -34,7 +34,7 @@ def _slug(name: str) -> str:
 
 
 def fetch_form(url: str):
-    """Trả về (title, fields, view_url). view_url là URL đã theo redirect."""
+    """Trả về (title, fields, view_url, pages). pages = số trang/section của form."""
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         view_url = resp.geturl()
@@ -47,12 +47,13 @@ def fetch_form(url: str):
 
     title = data[1][8] if len(data[1]) > 8 else ""
     questions = data[1][1] or []
+    pages = 1 + sum(1 for q in questions if q[3] == 8)   # mỗi 'page-break' (type 8) = +1 trang
     out = []
     for q in questions:
         name = q[1]
         type_code = q[3]
         entries = q[4] if len(q) > 4 else None
-        if not entries:                      # mục mô tả/ảnh, không có ô nhập
+        if not entries:                      # mục mô tả/ảnh/page-break, không có ô nhập
             continue
         for e in entries:
             eid = f"entry.{e[0]}"
@@ -65,7 +66,7 @@ def fetch_form(url: str):
                 "required": required,
                 "options": options,
             })
-    return title, out, view_url
+    return title, out, view_url, pages
 
 
 def main() -> int:
@@ -73,7 +74,7 @@ def main() -> int:
         print(__doc__)
         return 1
     url = sys.argv[1]
-    title, fields, _view_url = fetch_form(url)
+    title, fields, _view_url, _pages = fetch_form(url)
 
     print(f"\n📋 Form: {title}")
     print(f"   URL : {url}")

@@ -28,10 +28,10 @@ EXTRA = {  # nhãn + giá trị mặc định cho ô tham số phụ theo đích
 }
 
 
-def build_args(target, doc, extra, submit, headed, watch=False) -> types.SimpleNamespace:
+def build_args(target, doc, extra, submit, headed, watch=False, post=False) -> types.SimpleNamespace:
     a = types.SimpleNamespace(
         doc=doc, submit=submit, headed=headed,
-        form=None, post=False, refresh=False, cua=False,
+        form=None, post=post, refresh=False, cua=False,
         excel=None, sheet=None, header_row=1, watch=watch,
         access=False, app=False, profile=None, zalo=False, to=None,
     )
@@ -112,6 +112,9 @@ class App:
         ttk.Checkbutton(f3, text="Hiện trình duyệt (Form)", variable=self.headed).pack(anchor="w")
         self.watch = tk.BooleanVar(value=False)
         ttk.Checkbutton(f3, text="Mở Excel xem điền (Excel)", variable=self.watch).pack(anchor="w")
+        self.post = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f3, text="Gửi nhanh không trình duyệt — POST (Form; form nhiều trang tự dùng)",
+                        variable=self.post).pack(anchor="w")
 
         # 4) nút
         f4 = ttk.Frame(root); f4.pack(fill="x", **pad)
@@ -158,7 +161,7 @@ class App:
                 "Xác nhận", "ĐIỀN & NỘP thật vào đích đã chọn?\n(Xem trước thì bấm Hủy.)"):
             return
         a = build_args(self.target.get(), doc, self.extra_var.get().strip(),
-                       submit, self.headed.get(), self.watch.get())
+                       submit, self.headed.get(), self.watch.get(), self.post.get())
         self.btn_prev.configure(state="disabled")
         self.btn_go.configure(state="disabled")
         self.log.configure(state="normal"); self.log.delete("1.0", "end")

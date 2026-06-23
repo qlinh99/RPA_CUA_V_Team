@@ -80,12 +80,13 @@ def save_last_form(url: str) -> None:
 
 
 def _inspect_and_cache(url: str) -> dict:
-    title, fields, view_url = fetch_form(url)
+    title, fields, view_url, pages = fetch_form(url)
     schema = {
         "title": title,
         "fields": fields,
         "view_url": view_url,
         "post_url": re.sub(r"/viewform.*$", "/formResponse", view_url),
+        "pages": pages,
     }
     save_schema(url, schema)
     return schema
@@ -109,6 +110,8 @@ def resolve_schema(arg_form: "str | None", refresh: bool = False) -> dict:
 
     changed = bool(arg_form) and bool(last) and arg_form.strip() != last
     cached = None if (refresh or changed) else load_schema(url)
+    if cached and "pages" not in cached:        # cache cũ (trước khi thêm đếm trang) -> soi lại
+        cached = None
 
     if cached:
         print("   ⚡ Form không đổi → dùng schema đã lưu (bỏ qua soi form).")
@@ -272,19 +275,23 @@ def run_form(args) -> int:
         print("\n⛔ Còn trường trống/không hợp lệ — KHÔNG tự gửi (maker–checker).")
         return 2
 
+    pages = schema.get("pages", 1)
     if args.post:
-        print("\n📮 Gửi bằng HTTP POST...")
-        return 0 if form_filler.submit_post(schema["post_url"], items) else 1
+        print(f"\n📮 Gửi bằng HTTP POST... ({pages} trang)")
+        return 0 if form_filler.submit_post(schema["post_url"], items, pages=pages) else 1
 
     # Ép CUA ngay (Bậc 4) nếu --cua
     if args.cua:
         import cua_fallback
         print("\n🤖 CUA Gemini điền form (nhìn pixel)...")
+        if pages > 1:
+            print("   ⚠️  CUA chưa điều hướng nhiều trang — chỉ điền trang 1.")
         res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
         print(res)
         return 0 if res["ok"] else 1
 
-    print("\n🌐 Bậc 3 — Playwright điền form...")
+    extra = f" (form {pages} trang — tự bấm 'Tiếp')" if pages > 1 else ""
+    print(f"\n🌐 Bậc 3 — Playwright điền form{extra}...")
     shot = re.sub(r"[^0-9A-Za-z_-]", "_", (items[0]["value"] or "form"))[:40]
     res = form_filler.fill_and_submit_browser(
         schema["view_url"], items, headless=not args.headed,
