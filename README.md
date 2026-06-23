@@ -161,5 +161,4 @@ py -3.11 -m pip install -r requirements.txt
 
 Cần `.env` ở thư mục cha (`..\.env`): `OCR_PROVIDER=gemini`, `GEMINI_API_KEY=...`
 (và `ZALO_PASSWORD=...` nếu dùng demo Zalo). Engine OCR (`test_image_processing.py`) nằm ở thư mục cha.
-#   R P A _ t h u _ n g a n  
- 
+#
