@@ -91,7 +91,7 @@ class App:
         self.docs = []            # nguồn-sự-thật khi chọn qua hộp thoại
         self._set_display = False  # cờ: đang tự set ô (đừng coi là user gõ tay)
         f1 = ttk.Frame(root); f1.pack(fill="x", **pad)
-        ttk.Label(f1, text="Hoá đơn (ảnh/PDF — chọn nhiều):").pack(side="left")
+        ttk.Label(f1, text="Chứng từ (ảnh/PDF/Excel/CSV/Word — chọn nhiều):").pack(side="left")
         self.doc_var = tk.StringVar()
         self.doc_var.trace_add("write", self._on_doc_edit)
         ttk.Entry(f1, textvariable=self.doc_var).pack(side="left", fill="x", expand=True, padx=6)
@@ -135,8 +135,13 @@ class App:
 
     def pick_doc(self):
         ps = filedialog.askopenfilenames(
-            title="Chọn hoá đơn (giữ Ctrl/Shift để chọn nhiều)",
-            filetypes=[("Ảnh/PDF", "*.pdf *.jpg *.jpeg *.png"), ("Tất cả", "*.*")])
+            title="Chọn chứng từ (giữ Ctrl/Shift để chọn nhiều)",
+            filetypes=[
+                ("Chứng từ", "*.pdf *.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff "
+                             "*.xlsx *.xlsm *.xls *.csv *.tsv *.docx *.doc *.txt *.md *.json"),
+                ("Ảnh/PDF", "*.pdf *.jpg *.jpeg *.png"),
+                ("Dữ liệu (Excel/CSV/Word)", "*.xlsx *.xlsm *.xls *.csv *.tsv *.docx *.doc"),
+                ("Tất cả", "*.*")])
         if not ps:
             return
         self.docs = list(ps)
