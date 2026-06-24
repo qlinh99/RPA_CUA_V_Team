@@ -87,10 +87,13 @@ class App:
         root.attributes("-topmost", True)
         pad = {"padx": 10, "pady": 6}
 
-        # 1) file hoá đơn
+        # 1) file hoá đơn (chọn được NHIỀU)
+        self.docs = []            # nguồn-sự-thật khi chọn qua hộp thoại
+        self._set_display = False  # cờ: đang tự set ô (đừng coi là user gõ tay)
         f1 = ttk.Frame(root); f1.pack(fill="x", **pad)
-        ttk.Label(f1, text="Hoá đơn (ảnh/PDF):").pack(side="left")
+        ttk.Label(f1, text="Hoá đơn (ảnh/PDF — chọn nhiều):").pack(side="left")
         self.doc_var = tk.StringVar()
+        self.doc_var.trace_add("write", self._on_doc_edit)
         ttk.Entry(f1, textvariable=self.doc_var).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(f1, text="Chọn…", command=self.pick_doc).pack(side="left")
 
@@ -131,11 +134,31 @@ class App:
         self.on_target()
 
     def pick_doc(self):
-        p = filedialog.askopenfilename(
-            title="Chọn hoá đơn",
+        ps = filedialog.askopenfilenames(
+            title="Chọn hoá đơn (giữ Ctrl/Shift để chọn nhiều)",
             filetypes=[("Ảnh/PDF", "*.pdf *.jpg *.jpeg *.png"), ("Tất cả", "*.*")])
-        if p:
-            self.doc_var.set(p)
+        if not ps:
+            return
+        self.docs = list(ps)
+        self._set_display = True   # cập nhật ô hiển thị mà không xoá self.docs
+        if len(self.docs) == 1:
+            self.doc_var.set(self.docs[0])
+        else:
+            names = ", ".join(os.path.basename(p) for p in self.docs)
+            self.doc_var.set(f"{len(self.docs)} file: {names}")
+        self._set_display = False
+
+    def _on_doc_edit(self, *_):
+        # user gõ tay vào ô → coi như nhập 1 đường dẫn, bỏ danh sách đã chọn
+        if not self._set_display:
+            self.docs = []
+
+    def _resolve_docs(self):
+        """Trả về danh sách path: ưu tiên danh sách đã chọn, fallback ô gõ tay (1 file)."""
+        if self.docs:
+            return list(self.docs)
+        p = self.doc_var.get().strip()
+        return [p] if p else []
 
     def on_target(self):
         t = self.target.get()
@@ -153,31 +176,48 @@ class App:
             self.extra_var.set(default)
 
     def run(self, submit):
-        doc = self.doc_var.get().strip()
-        if not doc or not os.path.exists(doc):
-            messagebox.showwarning("Thiếu file", "Hãy chọn file hoá đơn hợp lệ.")
+        docs = self._resolve_docs()
+        bad = [d for d in docs if not os.path.exists(d)]
+        if not docs or bad:
+            msg = "Hãy chọn file hoá đơn hợp lệ." if not docs \
+                else "Không tìm thấy file:\n" + "\n".join(bad)
+            messagebox.showwarning("Thiếu file", msg)
             return
         if submit and not messagebox.askyesno(
-                "Xác nhận", "ĐIỀN & NỘP thật vào đích đã chọn?\n(Xem trước thì bấm Hủy.)"):
+                "Xác nhận",
+                f"ĐIỀN & NỘP thật {len(docs)} hoá đơn vào đích đã chọn?\n"
+                "(Xem trước thì bấm Hủy.)"):
             return
-        a = build_args(self.target.get(), doc, self.extra_var.get().strip(),
-                       submit, self.headed.get(), self.watch.get(), self.post.get())
+        # chụp tham số chung 1 lần (đọc widget phải ở luồng chính)
+        params = (self.target.get(), self.extra_var.get().strip(),
+                  submit, self.headed.get(), self.watch.get(), self.post.get())
         self.btn_prev.configure(state="disabled")
         self.btn_go.configure(state="disabled")
         self.log.configure(state="normal"); self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        threading.Thread(target=self._worker, args=(a,), daemon=True).start()
+        threading.Thread(target=self._worker, args=(docs, params), daemon=True).start()
 
-    def _worker(self, a):
+    def _worker(self, docs, params):
+        target, extra, submit, headed, watch, post = params
         old = sys.stdout
         sys.stdout = TkWriter(self.log)
+        codes = []
         try:
-            rc = dispatch(a)
-            print(f"\n=== Kết thúc (mã {rc}) ===")
-        except Exception as e:
-            import traceback
-            print("\n⛔ LỖI:", e)
-            print(traceback.format_exc())
+            for i, doc in enumerate(docs, 1):
+                print(f"\n{'='*48}\n[{i}/{len(docs)}] {os.path.basename(doc)}\n{'='*48}")
+                a = build_args(target, doc, extra, submit, headed, watch, post)
+                try:
+                    rc = dispatch(a)
+                except Exception as e:
+                    import traceback
+                    print("\n⛔ LỖI:", e)
+                    print(traceback.format_exc())
+                    rc = 1
+                codes.append(rc)
+                print(f"--- xong [{i}/{len(docs)}] (mã {rc}) ---")
+            ok = sum(1 for c in codes if c == 0)
+            print(f"\n=== TỔNG KẾT: {ok}/{len(docs)} thành công "
+                  f"(mã != 0: {[c for c in codes if c != 0] or 'không'}) ===")
         finally:
             sys.stdout = old
             self.root.after(0, self._done)

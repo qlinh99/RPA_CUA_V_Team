@@ -4,8 +4,7 @@
 
 ## Đang chờ / đang làm
 
-- [ ] **Xác nhận form bệnh nhân 3 trang** chạy qua đủ trang + Gửi OK (Playwright đa trang vừa sửa).
-      Rủi ro: ô `grid`/`scale` bắt buộc trên trang 3 có thể chặn sang trang.
+- (trống — form 3 trang đã chạy qua + Gửi OK, xem mục Đã xong)
 
 ## Ưu tiên cao (chứng thực nghiên cứu)
 
@@ -37,6 +36,11 @@
 
 ## Đã xong (gần đây)
 
+- [x] **Form bệnh nhân 3 trang chạy qua + Gửi OK** (đã kiểm chứng: ảnh "đã được ghi lại").
+      Sửa ô **ngày+giờ**: điền cả Giờ/Phút (mặc định 08:00) — trước đó bỏ trống giờ → "Thời gian
+      không hợp lệ" chặn Gửi. Thêm `_confirm_submitted`: chống báo `ok:True` giả khi form bị chặn.
+- [x] **GUI gửi nhiều ảnh/PDF một lúc** (app_gui: askopenfilenames + lặp dispatch + tổng kết).
+- [x] **Sắp xếp repo**: docs/ + reports/, code .py giữ phẳng ở root.
 - [x] autofill.py hợp nhất 5 đích + CLI gọn (epilog, nhóm tham số).
 - [x] CUA Gemini fallback (web) + tự fallback khi Playwright gãy + `--cua`.
 - [x] verify.py (R4) + benchmark.py (đo số liệu).

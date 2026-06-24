@@ -22,8 +22,19 @@ def _nfc(s) -> str:
 
 
 def _ddmmyyyy_to_iso(s: str) -> str:
-    d, m, y = str(s).split("/")
+    d, m, y = str(s).split("/")[:3]
     return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+
+
+DEFAULT_TIME = ("08", "00")   # giờ mặc định nếu chứng từ chỉ có ngày (câu hỏi date+time)
+
+
+def _split_time(val: str) -> "tuple[str, str]":
+    """Bóc 'HH:MM' (hoặc 'HHhMM') trong value; không có thì dùng giờ mặc định."""
+    m = re.search(r"(\d{1,2})\s*[:h]\s*(\d{2})", str(val))
+    if m:
+        return str(int(m.group(1))), str(int(m.group(2)))
+    return DEFAULT_TIME
 
 
 # ── Playwright ────────────────────────────────────────────────────────────────
@@ -60,6 +71,13 @@ def _try_fill_field(page, item) -> bool:
             box.click(); box.fill(str(val))
         elif t == "date":
             q.locator('input[type="date"]').first.fill(_ddmmyyyy_to_iso(val))
+            # Câu hỏi 'ngày + giờ' có thêm ô Giờ/Phút — BẮT BUỘC điền, nếu trống
+            # Google báo "Thời gian không hợp lệ" và CHẶN nút Gửi.
+            hh, mm = _split_time(val)
+            for lbl, v in (("Giờ", hh), ("Hour", hh), ("Phút", mm), ("Minute", mm)):
+                ti = q.locator(f'input[aria-label="{lbl}"]')
+                if ti.count():
+                    ti.first.fill(v)
         elif t in ("radio", "scale"):
             q.get_by_role("radio", name=str(val), exact=True).click()
         elif t == "dropdown":
@@ -73,6 +91,37 @@ def _try_fill_field(page, item) -> bool:
         return True
     except Exception:
         return False
+
+
+def _confirm_submitted(page) -> "tuple[bool, str]":
+    """Sau khi bấm Gửi: xác nhận đã sang trang phản hồi. Nếu chưa → bóc lỗi xác thực
+    (tên ô bị 'không hợp lệ'/bắt buộc) để báo rõ vì sao form KHÔNG gửi được."""
+    try:
+        page.wait_for_url(re.compile(r"formResponse"), timeout=12000)
+        return True, ""
+    except Exception:
+        pass
+    try:
+        page.wait_for_selector(
+            "text=/đã ghi câu trả lời|response has been recorded/i", timeout=4000)
+        return True, ""
+    except Exception:
+        pass
+    # vẫn ở trên form → tìm thông báo lỗi và câu hỏi tương ứng
+    bad = []
+    try:
+        errs = page.locator(
+            "text=/không hợp lệ|câu hỏi bắt buộc|bắt buộc|required|invalid|must/i")
+        for i in range(min(errs.count(), 6)):
+            li = errs.nth(i).locator("xpath=ancestor::div[@role='listitem'][1]")
+            txt = (li.first.inner_text() if li.count() else errs.nth(i).inner_text())
+            head = _nfc(txt).replace("\n", " ").strip()[:70]
+            if head and head not in bad:
+                bad.append(head)
+    except Exception:
+        pass
+    detail = "; ".join(bad) if bad else "form còn ô bắt buộc trống / lỗi xác thực"
+    return False, "Chưa rời được form (chưa gửi) — " + detail
 
 
 def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: bool = True,
@@ -106,17 +155,19 @@ def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: boo
                         continue
                     raise RuntimeError("Không thấy nút Tiếp/Gửi để đi tiếp")
 
-                # xác minh thật: URL đổi sang /formResponse hoặc text xác nhận đặc trưng
-                try:
-                    page.wait_for_url(re.compile(r"formResponse"), timeout=15000)
-                except Exception:
-                    page.wait_for_selector(
-                        "text=/đã ghi câu trả lời|response has been recorded/i", timeout=5000)
-                shot = shot_dir / f"{shot_name}_attempt{attempt}.png"
+                # xác minh THẬT: đã rời form sang trang xác nhận? Nếu KHÔNG (form còn
+                # lỗi xác thực / ô bắt buộc trống) → báo thất bại kèm tên ô, KHÔNG báo OK giả.
+                ok, detail = _confirm_submitted(page)
+                tag = "" if ok else "_FAIL"
+                shot = shot_dir / f"{shot_name}_attempt{attempt}{tag}.png"
                 page.screenshot(path=str(shot), full_page=True)
                 browser.close()
-                print(f"[OK] {shot_name} (lần {attempt}) -> {shot}")
-                return {"ok": True, "screenshot": str(shot), "attempts": attempt, "error": ""}
+                if ok:
+                    print(f"[OK] {shot_name} (lần {attempt}) -> {shot}")
+                    return {"ok": True, "screenshot": str(shot), "attempts": attempt, "error": ""}
+                # lỗi xác thực là TẤT ĐỊNH → không retry vô ích
+                print(f"[CHƯA GỬI] {shot_name}: {detail}")
+                return {"ok": False, "screenshot": str(shot), "attempts": attempt, "error": detail}
         except PWTimeout as e:
             last_err = f"Timeout: {e}"
         except Exception as e:

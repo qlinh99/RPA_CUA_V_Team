@@ -20,10 +20,14 @@ Cụ thể: đọc chứng từ (ảnh/PDF) bằng OCR → điền tự động 
 
 ## 3. Công việc đang làm (phiên này)
 
-- Vừa hoàn thiện **điều hướng nhiều trang cho Playwright** + sửa bug chờ `listitem` ở trang bìa
-  (đổi sang chờ `[role='button']`). Đang chờ user xác nhận form bệnh nhân 3 trang chạy qua + Gửi OK.
-- Đã sửa model Gemini (1.5-flash bị Google gỡ → fallback flash-lite/2.0-flash).
-- Đã sửa lỗi múi giờ Excel `--watch` (ghi ngày bằng số sê-ri).
+- **Form bệnh nhân 3 trang: chạy qua đủ trang + Gửi OK (đã kiểm chứng).** Sửa ô **ngày+giờ**
+  (`form_filler`): trước chỉ điền `input[type=date]`, bỏ trống Giờ/Phút → Google báo "Thời gian
+  không hợp lệ" chặn Gửi. Nay điền cả Giờ/Phút (mặc định 08:00, `DEFAULT_TIME`).
+- **`_confirm_submitted`**: chỉ báo OK khi thật sự sang `formResponse`/"đã được ghi lại"; kẹt thì
+  báo thất bại kèm tên ô + ảnh `*_FAIL.png` (chống `ok:True` giả của maker-checker).
+- **GUI gửi nhiều ảnh/PDF một lúc** (`app_gui`: `askopenfilenames` + lặp `dispatch` + tổng kết x/N).
+- Đã sửa model Gemini (1.5-flash bị Google gỡ → fallback flash-lite/2.0-flash) + múi giờ Excel `--watch`.
+- Hạn chế còn lại: đường **POST** chưa điền giờ cho ô date+time (chỉ Playwright đã sửa).
 
 ## 4. Các file (trong rpa_hoadon/)
 
