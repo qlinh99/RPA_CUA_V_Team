@@ -11,6 +11,7 @@ import _bootstrap  # temp->D:, .env, sys.path
 import re
 import time
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 
 SUBMIT_LABELS = ("gửi", "submit")
@@ -127,47 +128,63 @@ def _confirm_submitted(page) -> "tuple[bool, str]":
 def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: bool = True,
                             retries: int = 2, shot_dir: Path = SHOT_DIR,
                             channel: str = "chrome", slow_mo: int = 0,
-                            shot_name: str = "form") -> dict:
+                            shot_name: str = "form", browser=None) -> dict:
+    """
+    browser=None : tạo + đóng browser mới mỗi lần gọi (1 bản ghi độc lập).
+    browser=<Browser> : tái sử dụng browser đã mở, chỉ mở tab mới (multi-record).
+    """
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
     shot_dir.mkdir(exist_ok=True)
     last_err = ""
+
+    def _attempt(n: int, _browser) -> dict:
+        page = _browser.new_page()
+        try:
+            page.goto(form_url, wait_until="domcontentloaded")
+            page.wait_for_selector("[role='button']", timeout=15000)
+
+            remaining = [it for it in items if it.get("value") not in (None, "", [])]
+            for pg in range(1, 21):
+                remaining = [it for it in remaining if not _try_fill_field(page, it)]
+                submit_b, next_b = _find_nav(page)
+                if submit_b:
+                    submit_b.click()
+                    break
+                if next_b:
+                    print(f"   ➡️  sang trang {pg + 1} (bấm Tiếp)")
+                    next_b.click()
+                    try:
+                        next_b.wait_for(state="hidden", timeout=3000)
+                    except Exception:
+                        pass
+                    page.wait_for_selector("[role='button']", timeout=5000)
+                    continue
+                raise RuntimeError("Không thấy nút Tiếp/Gửi để đi tiếp")
+
+            ok, detail = _confirm_submitted(page)
+            tag = "" if ok else "_FAIL"
+            shot = shot_dir / f"{shot_name}_attempt{n}{tag}.png"
+            page.screenshot(path=str(shot), full_page=True)
+            if ok:
+                print(f"[OK] {shot_name} (lần {n}) -> {shot}")
+                return {"ok": True, "screenshot": str(shot), "attempts": n, "error": ""}
+            # lỗi xác thực là TẤT ĐỊNH → không retry vô ích
+            print(f"[CHƯA GỬI] {shot_name}: {detail}")
+            return {"ok": False, "screenshot": str(shot), "attempts": n, "error": detail}
+        finally:
+            page.close()
+
     for attempt in range(1, retries + 1):
         try:
+            if browser is not None:
+                return _attempt(attempt, browser)
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=headless, channel=channel, slow_mo=slow_mo)
-                page = browser.new_page()
-                page.goto(form_url, wait_until="domcontentloaded")
-                page.wait_for_selector("[role='button']", timeout=15000)   # trang bìa không có ô, chỉ có nút
-
-                # ĐIỀN QUA NHIỀU TRANG: điền ô trang hiện tại → "Tiếp" → ... → "Gửi"
-                remaining = [it for it in items if it.get("value") not in (None, "", [])]
-                for pg in range(1, 21):                       # tối đa 20 trang
-                    remaining = [it for it in remaining if not _try_fill_field(page, it)]
-                    submit_b, next_b = _find_nav(page)
-                    if submit_b:
-                        submit_b.click()
-                        break
-                    if next_b:
-                        print(f"   ➡️  sang trang {pg + 1} (bấm Tiếp)")
-                        next_b.click()
-                        page.wait_for_timeout(900)
-                        continue
-                    raise RuntimeError("Không thấy nút Tiếp/Gửi để đi tiếp")
-
-                # xác minh THẬT: đã rời form sang trang xác nhận? Nếu KHÔNG (form còn
-                # lỗi xác thực / ô bắt buộc trống) → báo thất bại kèm tên ô, KHÔNG báo OK giả.
-                ok, detail = _confirm_submitted(page)
-                tag = "" if ok else "_FAIL"
-                shot = shot_dir / f"{shot_name}_attempt{attempt}{tag}.png"
-                page.screenshot(path=str(shot), full_page=True)
-                browser.close()
-                if ok:
-                    print(f"[OK] {shot_name} (lần {attempt}) -> {shot}")
-                    return {"ok": True, "screenshot": str(shot), "attempts": attempt, "error": ""}
-                # lỗi xác thực là TẤT ĐỊNH → không retry vô ích
-                print(f"[CHƯA GỬI] {shot_name}: {detail}")
-                return {"ok": False, "screenshot": str(shot), "attempts": attempt, "error": detail}
+                _b = p.chromium.launch(headless=headless, channel=channel, slow_mo=slow_mo)
+                try:
+                    return _attempt(attempt, _b)
+                finally:
+                    _b.close()
         except PWTimeout as e:
             last_err = f"Timeout: {e}"
         except Exception as e:
@@ -175,6 +192,18 @@ def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: boo
         print(f"[RETRY] {shot_name} lần {attempt} lỗi: {last_err}")
         time.sleep(2 * attempt)
     return {"ok": False, "screenshot": "", "attempts": retries, "error": last_err}
+
+
+@contextmanager
+def browser_context(headless: bool = True, channel: str = "chrome", slow_mo: int = 0):
+    """Mở 1 browser dùng chung cho nhiều bản ghi; đóng khi thoát context."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless, channel=channel, slow_mo=slow_mo)
+        try:
+            yield browser
+        finally:
+            browser.close()
 
 
 # ── HTTP POST (không trình duyệt) ─────────────────────────────────────────────

@@ -15,7 +15,7 @@ CÁCH CHẠY (Python 3.11):
   # xem form cần gì + OCR trích được gì, KHÔNG gửi:
   py -3.11 autofill.py --form <URL_FORM> --doc "đường_dẫn\\chungtu.pdf"
 
-  # điền + gửi (thêm --headed để xem trình duyệt; --post để dùng HTTP thay trình duyệt)
+  # điền + gửi (thêm --headed để xem trình duyệt)
   py -3.11 autofill.py --form <URL> --doc "...\\anh.jpg" --submit --headed
 """
 from __future__ import annotations
@@ -93,13 +93,7 @@ def _inspect_and_cache(url: str) -> dict:
 
 
 def resolve_schema(arg_form: "str | None", refresh: bool = False) -> dict:
-    """
-    Quyết định dùng form nào + có cần soi lại không.
-      - arg_form trống     -> dùng FORM CŨ (form gần nhất), không soi lại.
-      - arg_form == cũ     -> dùng schema đã lưu.
-      - arg_form ĐỔI       -> soi lại lấy trường mới.
-      - --refresh          -> ép soi lại.
-    """
+    """Soi form mỗi phiên — không dùng cache file."""
     last = load_last_form()
     url = (arg_form or last or "").strip()
     if not url:
@@ -108,22 +102,8 @@ def resolve_schema(arg_form: "str | None", refresh: bool = False) -> dict:
     if not arg_form:
         print(f"   ↩️  Không truyền --form → dùng FORM CŨ: {url}")
 
-    changed = bool(arg_form) and bool(last) and arg_form.strip() != last
-    cached = None if (refresh or changed) else load_schema(url)
-    if cached and "pages" not in cached:        # cache cũ (trước khi thêm đếm trang) -> soi lại
-        cached = None
-
-    if cached:
-        print("   ⚡ Form không đổi → dùng schema đã lưu (bỏ qua soi form).")
-        schema = cached
-    else:
-        if changed:
-            print("   🔄 Form THAY ĐỔI so với lần trước → soi lại lấy các trường mới.")
-        elif refresh:
-            print("   🔄 --refresh → soi lại form.")
-        schema = _inspect_and_cache(url)
-        print("   💾 Đã soi form và lưu schema.")
-
+    schema = _inspect_and_cache(url)
+    print("   💾 Đã soi form và lưu schema.")
     save_last_form(url)
     return schema
 
@@ -153,7 +133,11 @@ def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     )
     if doc_text is not None:
         p += f"\nNỘI DUNG VĂN BẢN CHỨNG TỪ:\n----------\n{doc_text}\n"
-    p += "\nChỉ in JSON thuần, không markdown, không giải thích."
+    p += (
+        "\nNếu chứng từ chứa NHIỀU bản ghi (bảng danh sách, nhiều phiếu, nhiều dòng dữ liệu), "
+        "trả về JSON array [{...}, {...}]; nếu chỉ 1 bản ghi, trả về JSON object {...}.\n"
+        "Chỉ in JSON thuần, không markdown, không giải thích."
+    )
     return p
 
 
@@ -162,8 +146,8 @@ def _strip_json(text: str) -> str:
     fence = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
     if fence:
         t = fence.group(1).strip()
-    if not t.startswith("{"):
-        brace = re.search(r"\{.*\}", t, re.S)
+    if not t.startswith("{") and not t.startswith("["):
+        brace = re.search(r"[\[{].*[\]}]", t, re.S)
         if brace:
             t = brace.group(0)
     return t
@@ -209,10 +193,35 @@ def normalize_value(val, field: dict):
 
 
 # ── OCR chứng từ theo schema của form ─────────────────────────────────────────
-def extract_values(doc_path: str, fields: "list[dict]") -> dict:
+_ocr_cache: "dict[tuple, list[dict]]" = {}   # cache phiên: tránh OCR lại khi preview→submit
+
+
+def _cache_key(doc_path: str, fields: "list[dict]") -> tuple:
+    import os
+    try:
+        mtime = os.path.getmtime(doc_path)
+    except OSError:
+        mtime = 0
+    fields_sig = hashlib.md5(
+        json.dumps([_fid(f) for f in fields], ensure_ascii=False).encode()
+    ).hexdigest()[:8]
+    return (doc_path, mtime, fields_sig)
+
+
+def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
+    """OCR doc → danh sách bản ghi (thường 1; bảng/danh sách cho N).
+    Kết quả được cache trong phiên — lần 2 (submit) dùng lại lần 1 (preview).
+    """
+    key = _cache_key(doc_path, fields)
+    if key in _ocr_cache:
+        print("  ⚡ Dùng kết quả OCR đã cache (bỏ qua OCR lần 2)")
+        return _ocr_cache[key]
+
     pages = file_to_pages(doc_path)
     adapter = create_ocr_adapter()
-    merged: dict = {}
+    single_merged: dict = {}   # gộp các trang đơn-bản-ghi
+    multi_records: list = []   # bảng ghi nhiều bản ghi phát hiện từ trang nào đó
+
     for idx, page in enumerate(pages, 1):
         if page[0] == "text":
             result = adapter.ocr([], prompt=build_prompt(fields, page[1]))
@@ -227,22 +236,34 @@ def extract_values(doc_path: str, fields: "list[dict]") -> dict:
         except Exception as e:
             print(f"  ⚠️  Trang {idx} không phải JSON: {e}")
             continue
-        for k, v in data.items():            # gộp: lấy giá trị hợp lệ đầu tiên
-            if v not in (None, "", "null") and merged.get(k) in (None, "", "null", None):
-                merged.setdefault(k, v)
-    return merged
+        if isinstance(data, list):
+            records = [r for r in data if isinstance(r, dict)]
+            if len(records) > 1:
+                print(f"  📋 Trang {idx}: phát hiện {len(records)} bản ghi")
+                multi_records.extend(records)
+            elif records:
+                for k, v in records[0].items():
+                    if v not in (None, "", "null") and single_merged.get(k) in (None, "", "null", None):
+                        single_merged.setdefault(k, v)
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                if v not in (None, "", "null") and single_merged.get(k) in (None, "", "null", None):
+                    single_merged.setdefault(k, v)
+
+    result = multi_records if multi_records else [single_merged]
+    if multi_records and single_merged:
+        result.insert(0, single_merged)
+    _ocr_cache[key] = result
+    return result
 
 
-def _extract_items(doc: str, fields: "list[dict]"):
-    """OCR chứng từ + chuẩn hoá -> (items có 'value', danh sách issues)."""
-    print(f"\n🧾 OCR chứng từ: {doc}")
-    raw = extract_values(doc, fields)
+def _normalize_record(raw: dict, fields: "list[dict]") -> "tuple[list, list]":
+    """Chuẩn hoá 1 bản ghi raw → (items, issues)."""
     items, issues, optional_empty = [], [], []
     for f in fields:
         val, err = normalize_value(raw.get(_fid(f)), f)
         items.append({**f, "value": val})
         if val in (None, "", []):
-            # CHỈ chặn nếu trường BẮT BUỘC; trường tùy chọn để trống là hợp lệ.
             if f.get("required"):
                 issues.append(f"{f['label']}: BẮT BUỘC nhưng trống"
                               + (f" ({err})" if err else ""))
@@ -264,6 +285,47 @@ def _extract_items(doc: str, fields: "list[dict]"):
     return items, issues
 
 
+def _extract_items(doc, fields: "list[dict]") -> "list[tuple[list, list]]":
+    """OCR hoặc đọc dict → list[(items, issues)] — 1 phần tử nếu đơn bản ghi, N nếu nhiều.
+    doc: str đường dẫn file, hoặc dict dữ liệu đã đọc sẵn.
+    """
+    if isinstance(doc, dict):
+        raw = _map_raw_to_fields(doc, fields)
+        return [_normalize_record(raw, fields)]
+    print(f"\n🧾 OCR chứng từ: {doc}")
+    raws = extract_values(doc, fields)
+    if len(raws) > 1:
+        print(f"  📋 Tổng: {len(raws)} bản ghi trong chứng từ")
+    return [_normalize_record(raw, fields) for raw in raws]
+
+
+def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
+    """Gửi 1 bản ghi. browser: trình duyệt tái sử dụng (multi-record, None = tự tạo)."""
+    pages = schema.get("pages", 1)
+    if args.cua:
+        import cua_fallback
+        print("\n🤖 CUA Gemini điền form (nhìn pixel)...")
+        if pages > 1:
+            print("   ⚠️  CUA chưa điều hướng nhiều trang — chỉ điền trang 1.")
+        res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
+        print(res)
+        return 0 if res["ok"] else 1
+    extra = f" (form {pages} trang — tự bấm 'Tiếp')" if pages > 1 else ""
+    print(f"\n🌐 Bậc 3 — Playwright điền form{extra}...")
+    shot = re.sub(r"[^0-9A-Za-z_-]", "_", str(items[0].get("value") or "form"))[:40]
+    res = form_filler.fill_and_submit_browser(
+        schema["view_url"], items, headless=not args.headed,
+        slow_mo=700 if args.headed else 0, shot_name=shot,
+        browser=browser,
+    )
+    if not res["ok"]:
+        print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK CUA Gemini...")
+        import cua_fallback
+        res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
+    print(res)
+    return 0 if res["ok"] else 1
+
+
 def run_form(args) -> int:
     print(f"\n🔎 Form: {args.form or '(dùng form cũ)'}")
     schema = resolve_schema(args.form, refresh=args.refresh)
@@ -276,104 +338,42 @@ def run_form(args) -> int:
         warn = " ⚠️ BẮT BUỘC → Google sẽ chặn gửi!" if f.get("required") else ""
         print(f"   ⏭️  Bỏ qua trường kiểu '{f['type']}' (chưa hỗ trợ): {f['label']}{warn}")
 
-    items, issues = _extract_items(args.doc, fields)
+    all_records = _extract_items(args.doc, fields)
+    n = len(all_records)
+    if n > 1:
+        print(f"\n📋 {n} bản ghi → sẽ gửi {n} lần")
 
     if not args.submit:
-        print("\n💡 Chưa gửi. Thêm --submit để điền lên form.")
+        print(f"\n💡 Chưa gửi ({n} bản ghi). Thêm --submit để điền lên form.")
         return 0
-    if issues:
-        print("\n⛔ Còn trường trống/không hợp lệ — KHÔNG tự gửi (maker–checker).")
-        return 2
 
-    pages = schema.get("pages", 1)
-    if args.post:
-        print(f"\n📮 Gửi bằng HTTP POST... ({pages} trang)")
-        return 0 if form_filler.submit_post(schema["post_url"], items, pages=pages) else 1
+    codes = []
 
-    # Ép CUA ngay (Bậc 4) nếu --cua
-    if args.cua:
-        import cua_fallback
-        print("\n🤖 CUA Gemini điền form (nhìn pixel)...")
-        if pages > 1:
-            print("   ⚠️  CUA chưa điều hướng nhiều trang — chỉ điền trang 1.")
-        res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
-        print(res)
-        return 0 if res["ok"] else 1
+    def _run_records(shared_browser=None):
+        for i, (items, issues) in enumerate(all_records, 1):
+            if n > 1:
+                print(f"\n  ══ Bản ghi {i}/{n} ══")
+            if issues:
+                print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+                codes.append(2)
+                continue
+            codes.append(_submit_form_record(schema, items, args, browser=shared_browser))
 
-    extra = f" (form {pages} trang — tự bấm 'Tiếp')" if pages > 1 else ""
-    print(f"\n🌐 Bậc 3 — Playwright điền form{extra}...")
-    shot = re.sub(r"[^0-9A-Za-z_-]", "_", (items[0]["value"] or "form"))[:40]
-    res = form_filler.fill_and_submit_browser(
-        schema["view_url"], items, headless=not args.headed,
-        slow_mo=700 if args.headed else 0, shot_name=shot,
-    )
-    if not res["ok"]:
-        print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK Bậc 4 CUA Gemini...")
-        import cua_fallback
-        res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
-    print(res)
-    return 0 if res["ok"] else 1
-
-
-def run_app(args) -> int:
-    import desktop_filler as D
-    fields = D.schema()
-    if not fields:
-        print("⛔ Chưa cấu hình FIELDS trong desktop_filler.py.")
-        print("   Soi app:  py -3.11 inspect_uia.py \"<tên app>\" --all  rồi điền auto_id.")
-        return 1
-    print(f"\n🖥️  App desktop: '{D.WINDOW_TITLE}'  ({len(fields)} ô)")
-    items, issues = _extract_items(args.doc, fields)
-
-    if not args.submit:
-        print("\n💡 Chưa điền. Thêm --submit để điền vào app.")
-        return 0
-    if issues:
-        print("\n⛔ Còn trường trống/không hợp lệ — KHÔNG tự điền (maker–checker).")
-        return 2
-
-    values = {it["id"]: it["value"] for it in items}
-    D.fill_desktop(values, submit=True)
-    print("\n✅ Đã điền vào app desktop (kiểm cột [✓]/[≠] để đối chiếu).")
-    return 0
-
-
-def run_profile(args) -> int:
-    import desktop_profiles
-    try:
-        prof = desktop_profiles.load_profile(args.profile)
-    except FileNotFoundError as e:
-        print(f"⛔ {e}")
-        return 1
-    fields = desktop_profiles.schema(prof)
-    method = prof.get("method", "uia")
-    print(f"\n🖥️  App: {prof.get('name', args.profile)}  ({len(fields)} ô, bậc={method.upper()})")
-    items, issues = _extract_items(args.doc, fields)
-
-    if not args.submit:
-        print("\n💡 Chưa điền. Thêm --submit để điền vào app.")
-        return 0
-    if issues:
-        print("\n⛔ Còn trường trống/không hợp lệ — KHÔNG tự điền (maker–checker).")
-        return 2
-
-    values = {it["id"]: it["value"] for it in items}
-    if method == "com":
-        import access_filler
-        access_filler.fill_access(values, profile=prof)
+    if n > 1 and not args.cua:
+        print(f"\n♻️  Tái sử dụng browser cho {n} bản ghi")
+        with form_filler.browser_context(
+            headless=not args.headed,
+            slow_mo=700 if args.headed else 0,
+        ) as shared_browser:
+            _run_records(shared_browser)
     else:
-        import desktop_filler
-        desktop_filler.fill_desktop(values, submit=True, profile=prof)
-    print("\n✅ Đã điền vào app theo profile.")
-    return 0
+        _run_records()
 
+    ok = sum(1 for c in codes if c == 0)
+    if n > 1:
+        print(f"\n✅ {ok}/{n} bản ghi gửi thành công")
+    return 0 if ok == n else 1
 
-def run_zalo(args) -> int:
-    if not args.to:
-        print('⛔ Cần --to "Tên người" để gửi Zalo. VD: --zalo --to "My Documents"')
-        return 1
-    import zalo_send_invoice as Z
-    return Z.run(args.to, args.doc, do_send=args.submit)   # --submit = thực sự gửi
 
 
 def run_access(args) -> int:
@@ -381,17 +381,23 @@ def run_access(args) -> int:
     import access_filler
     fields = desktop_filler.schema()
     print(f"\n🗄️  Microsoft Access ({len(fields)} ô) — điền qua COM")
-    items, issues = _extract_items(args.doc, fields)
+    all_records = _extract_items(args.doc, fields)
     if not args.submit:
-        print("\n💡 Chưa điền. Thêm --submit để điền vào form Access.")
+        print(f"\n💡 Chưa điền ({len(all_records)} bản ghi). Thêm --submit để điền vào form Access.")
         return 0
-    if issues:
-        print("\n⛔ Còn trường trống/không hợp lệ — KHÔNG tự điền (maker–checker).")
-        return 2
-    values = {it["id"]: it["value"] for it in items}
-    access_filler.fill_access(values, submit=True)
-    print("\n✅ Đã điền vào form Access. Kiểm bảng HoaDon để đối chiếu.")
-    return 0
+    codes = []
+    for i, (items, issues) in enumerate(all_records, 1):
+        if len(all_records) > 1:
+            print(f"\n  ══ Bản ghi {i}/{len(all_records)} ══")
+        if issues:
+            print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+            codes.append(2); continue
+        values = {it["id"]: it["value"] for it in items}
+        access_filler.fill_access(values, submit=True)
+        print("\n✅ Đã điền vào form Access.")
+        codes.append(0)
+    print("Kiểm bảng HoaDon để đối chiếu.")
+    return 0 if all(c == 0 for c in codes) else 1
 
 
 def run_excel(args) -> int:
@@ -399,21 +405,26 @@ def run_excel(args) -> int:
     sheet_name, fields = excel_target.inspect_excel(args.excel, args.sheet, args.header_row)
     print(f"   Sheet '{sheet_name}'  ({len(fields)} cột)")
 
-    items, _issues = _extract_items(args.doc, fields)
-
+    all_records = _extract_items(args.doc, fields)
     if not args.submit:
-        print("\n💡 Chưa ghi. Thêm --submit để thêm dòng vào báo cáo.")
+        print(f"\n💡 Chưa ghi ({len(all_records)} bản ghi). Thêm --submit để thêm dòng vào báo cáo.")
         return 0
-
-    values = {it["id"]: it["value"] for it in items}
-    if args.watch:
-        print("\n👁️  Mở Excel để xem điền trực tiếp (win32com)...")
-        import excel_com
-        row = excel_com.append_row_visible(args.excel, args.sheet, args.header_row,
-                                           fields, values, delay=0.6)
-    else:
-        row = excel_target.append_row(args.excel, args.sheet, args.header_row, fields, values)
-    print(f"\n✅ Đã thêm dữ liệu vào dòng {row} của '{sheet_name}' trong {args.excel}")
+    rows_added = []
+    for i, (items, _issues) in enumerate(all_records, 1):
+        if len(all_records) > 1:
+            print(f"\n  ══ Bản ghi {i}/{len(all_records)} ══")
+        values = {it["id"]: it["value"] for it in items}
+        if args.watch:
+            print("\n👁️  Mở Excel để xem điền trực tiếp (win32com)...")
+            import excel_com
+            row = excel_com.append_row_visible(args.excel, args.sheet, args.header_row,
+                                               fields, values, delay=0.6)
+        else:
+            row = excel_target.append_row(args.excel, args.sheet, args.header_row, fields, values)
+        print(f"\n✅ Đã thêm vào dòng {row} của '{sheet_name}'")
+        rows_added.append(row)
+    if len(rows_added) > 1:
+        print(f"\n✅ Tổng: {len(rows_added)} dòng thêm vào '{sheet_name}' trong {args.excel}")
     return 0
 
 
@@ -424,9 +435,6 @@ VÍ DỤ (mặc định CHỈ trích xuất xem trước; thêm --submit mới t
                 py -3.11 autofill.py --doc hd2.pdf --submit          (dùng lại form cũ)
   Excel       : py -3.11 autofill.py --excel bao_cao.xlsx --doc hd.pdf --submit [--watch]
   Access      : py -3.11 autofill.py --access --doc hd.pdf --submit
-  App desktop : py -3.11 autofill.py --app --doc hd.pdf --submit     (cấu hình desktop_filler.py)
-  Zalo        : py -3.11 autofill.py --zalo --to "My Documents" --doc hd.pdf --submit
-
 Chọn ĐÚNG 1 đích. Không có đích + không có form cũ -> báo lỗi.
 """
 
@@ -435,7 +443,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         prog="autofill.py",
         description="Tool RPA: OCR chứng từ (ảnh/PDF) -> điền vào 1 đích "
-                    "(Google Form / Excel / Access / App desktop / Zalo).",
+                    "(Google Form / Excel / Access).",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -446,18 +454,13 @@ def main() -> int:
                    help="URL Google Form. Bỏ trống = dùng form cũ; URL khác = tự soi lại")
     g.add_argument("--excel", default=None, help="File .xlsx báo cáo (mỗi chứng từ = 1 dòng)")
     g.add_argument("--access", action="store_true", help="Form Microsoft Access (qua COM)")
-    g.add_argument("--app", action="store_true", help="App desktop qua UIA (app không có API, vd OH)")
-    g.add_argument("--profile", default=None, help="Điền theo profile app trong profiles/<tên>.json (đa-app)")
-    g.add_argument("--zalo", action="store_true", help="Gửi hoá đơn vào chat Zalo của người --to")
 
     f = ap.add_argument_group("Tuỳ chọn theo đích")
-    f.add_argument("--post", action="store_true", help="(Form) gửi HTTP POST thay vì trình duyệt")
     f.add_argument("--headed", action="store_true", help="(Form) hiện trình duyệt + chạy chậm")
     f.add_argument("--refresh", action="store_true", help="(Form) ép soi lại form")
     f.add_argument("--sheet", default=None, help="(Excel) tên sheet")
     f.add_argument("--header-row", type=int, default=1, dest="header_row", help="(Excel) dòng tiêu đề")
     f.add_argument("--watch", action="store_true", help="(Excel) mở Excel thật xem điền (win32com)")
-    f.add_argument("--to", default=None, help="(Zalo) tên người nhận trong danh bạ")
     f.add_argument("--cua", action="store_true",
                    help="(Form) ép dùng CUA Gemini (nhìn pixel) thay Playwright")
 
@@ -465,14 +468,8 @@ def main() -> int:
                     help="Thực sự ghi/gửi (mặc định chỉ trích xuất xem trước)")
     args = ap.parse_args()
 
-    if args.profile:
-        return run_profile(args)
-    if args.zalo:
-        return run_zalo(args)
     if args.access:
         return run_access(args)
-    if args.app:
-        return run_app(args)
     if args.excel:
         return run_excel(args)
     return run_form(args)

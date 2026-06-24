@@ -20,7 +20,7 @@ API keys (chỉ cần key của provider đang dùng):
   OLLAMA_BASE_URL=http://localhost:11434   (optional, default là localhost)
 
 Model cụ thể (optional — đã có default tốt):
-  MODEL_GEMINI=flash15        # flash | flash15 | pro
+  MODEL_GEMINI=flashlite      # flashlite | flash | pro
   MODEL_OPENAI=gpt-4o-mini    # gpt-4o | gpt-4o-mini
   MODEL_CLAUDE=haiku          # haiku | sonnet
   MODEL_OLLAMA=llava          # llava | llama3.2-vision
@@ -456,7 +456,8 @@ class OCRAdapter(ABC):
 
     @staticmethod
     def _http_post(url: str, payload: dict,
-                   headers: "dict | None" = None) -> "tuple[dict | None, str, int]":
+                   headers: "dict | None" = None,
+                   max_retries: int = MAX_API_RETRIES) -> "tuple[dict | None, str, int]":
         """
         POST JSON với exponential backoff retry.
 
@@ -476,7 +477,7 @@ class OCRAdapter(ABC):
         last_error = ""
         last_code  = 0
 
-        for attempt in range(MAX_API_RETRIES):
+        for attempt in range(max_retries):
             if attempt > 0:
                 wait = min(2 ** attempt, MAX_RETRY_WAIT)
                 print(f"   ⏳ Retry {attempt}/{MAX_API_RETRIES-1} sau {wait}s...")
@@ -555,7 +556,7 @@ GEMINI_MODELS = {
     "flash15":   "gemini-2.0-flash",         # alias cũ (1.5 đã bị Google gỡ -> 404)
     "pro":       "gemini-2.5-pro",
 }
-GEMINI_MODEL_FALLBACK = ["flash", "flashlite", "flash20"]
+GEMINI_MODEL_FALLBACK: "list[str]" = []   # không thử model Gemini khác; cross-provider fallback qua ChainOCRAdapter
 GEMINI_API_BASE       = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
@@ -565,10 +566,11 @@ class GeminiOCRAdapter(OCRAdapter):
     Model mặc định: MODEL_GEMINI env var, hoặc flash15.
     """
 
-    def __init__(self, api_key: str, model: "str | None" = None):
-        self.api_key = api_key.strip()
-        # FIX: default resolved tại __init__, không phải lúc import
-        self.model   = model or os.environ.get("MODEL_GEMINI", "flash15")
+    def __init__(self, api_key: str, model: "str | None" = None,
+                 retries: int = MAX_API_RETRIES):
+        self.api_key  = api_key.strip()
+        self.model    = model or os.environ.get("MODEL_GEMINI", "flashlite")
+        self.retries  = retries
 
     def _build_payload(self, images: list[str], prompt: str, n: int) -> dict:
         multi_note = (
@@ -609,7 +611,7 @@ class GeminiOCRAdapter(OCRAdapter):
             if try_model != self.model:
                 print(f"🔄 Fallback → {mn}")
 
-            data, last_err, http_code = self._http_post(url, payload)
+            data, last_err, http_code = self._http_post(url, payload, max_retries=self.retries)
 
             # Quota exceeded → fallback model cùng account cũng vô ích
             if data is None and http_code == 429 and (
@@ -625,6 +627,7 @@ class GeminiOCRAdapter(OCRAdapter):
                 break
 
             if data is None:
+                print(f"  ❌ {mn} lỗi HTTP {http_code}: {last_err[:120]}")
                 continue
 
             try:
@@ -1041,6 +1044,30 @@ class GoogleVisionOCRAdapter(OCRAdapter):
 
 
 # ============================================================
+# CHAIN ADAPTER — thử provider theo thứ tự, fallback khi thất bại
+# ============================================================
+
+class ChainOCRAdapter(OCRAdapter):
+    """Thử adapter theo thứ tự; chuyển sang adapter tiếp khi thất bại hoàn toàn."""
+
+    def __init__(self, *adapters: OCRAdapter):
+        self.adapters = list(adapters)
+
+    def _do_ocr(self, images: list, prompt: str,
+                image_sizes: "list[tuple[int,int]] | None") -> dict:
+        last: dict = {}
+        for adapter in self.adapters:
+            result = adapter._do_ocr(images, prompt, image_sizes)
+            if result.get("success"):
+                return result
+            last = result
+            name = adapter.__class__.__name__.replace("OCRAdapter", "")
+            print(f"⚠️  {name} thất bại ({result.get('error', '')[:80]}) — thử provider tiếp theo...")
+        return last or self._err("Tất cả provider thất bại", n_images=len(images),
+                                 image_sizes=image_sizes)
+
+
+# ============================================================
 # FACTORY — tạo adapter từ .env
 # ============================================================
 
@@ -1063,6 +1090,11 @@ def create_ocr_adapter() -> OCRAdapter:
         key = os.environ.get("GEMINI_API_KEY", "")
         if not key:
             raise ValueError("Thiếu GEMINI_API_KEY trong .env")
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            print("   ↩️  Fallback provider: OpenAI GPT-4o-mini")
+            gemini = GeminiOCRAdapter(api_key=key, retries=1)   # fail nhanh, OpenAI lo fallback
+            return ChainOCRAdapter(gemini, OpenAIOCRAdapter(api_key=openai_key, model="gpt-4o-mini"))
         return GeminiOCRAdapter(api_key=key)
 
     elif provider == "openai":

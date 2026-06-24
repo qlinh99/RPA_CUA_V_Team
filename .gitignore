@@ -1,7 +1,7 @@
 # Bí mật — KHÔNG commit
 .env
 *.env
-
+.venv/
 # File tạm / sinh ra khi chạy
 _tmp/
 screenshots/

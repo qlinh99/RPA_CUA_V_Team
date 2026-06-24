@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPA Thu Ngân — Kiến trúc & Workflow</title>
+<style>
+  :root {
+    --c0: #1a1a2e; --c1: #16213e; --c2: #0f3460;
+    --l0: #e94560; --l1: #f5a623; --l2: #7ed321;
+    --l3: #4a90e2; --l4: #9b59b6; --l5: #1abc9c;
+    --l6: #95a5a6; --l7: #e67e22;
+    --text: #ecf0f1; --muted: #bdc3c7; --border: #2c3e50;
+    --card: #1e2a3a; --card2: #253447;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--c0); color: var(--text); font-family: 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; }
+
+  header { background: linear-gradient(135deg, var(--c2), #6c3483); padding: 32px 40px; border-bottom: 3px solid var(--l0); }
+  header h1 { font-size: 2rem; font-weight: 700; letter-spacing: 1px; }
+  header p  { color: var(--muted); margin-top: 6px; font-size: 0.95rem; }
+
+  nav { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 40px; background: var(--c1); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+  nav a { color: var(--muted); text-decoration: none; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid var(--border); transition: all .2s; }
+  nav a:hover { color: var(--text); background: var(--border); }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 32px 40px; }
+
+  section { margin-bottom: 56px; }
+  h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid; display: flex; align-items: center; gap: 10px; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 18px 0 10px; }
+
+  /* LAYER BADGE */
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; letter-spacing: .5px; }
+
+  /* ARCHITECTURE DIAGRAM */
+  .arch { display: flex; flex-direction: column; gap: 4px; }
+  .layer { border-radius: 10px; border: 1px solid rgba(255,255,255,.08); overflow: hidden; }
+  .layer-header { padding: 10px 20px; display: flex; align-items: center; gap: 12px; font-weight: 600; cursor: pointer; user-select: none; }
+  .layer-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; padding: 16px 20px; background: rgba(0,0,0,.25); }
+  .module { background: var(--card); border-radius: 8px; padding: 12px 14px; border-left: 3px solid; font-size: 0.88rem; }
+  .module .name { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+  .module .desc { color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+  .module .file { font-size: 0.75rem; margin-top: 6px; opacity: .6; font-family: monospace; }
+
+  /* FLOW DIAGRAM */
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .flow-step { display: flex; align-items: stretch; gap: 0; }
+  .flow-num  { width: 36px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+  .flow-circle { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .9rem; flex-shrink: 0; z-index: 1; }
+  .flow-line  { flex: 1; width: 2px; background: var(--border); margin: 0 auto; }
+  .flow-content { flex: 1; background: var(--card); border-radius: 10px; padding: 14px 18px; margin: 0 0 6px 14px; border-left: 3px solid; }
+  .flow-content h4 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+  .flow-content p  { font-size: .85rem; color: var(--muted); line-height: 1.5; }
+  .flow-content .sub { margin-top: 8px; padding: 8px 12px; background: rgba(0,0,0,.3); border-radius: 6px; font-size: .82rem; font-family: monospace; color: #a8d8a8; }
+  .flow-content ul { margin: 8px 0 0 16px; font-size: .83rem; color: var(--muted); }
+  .flow-content ul li { margin-bottom: 3px; }
+
+  /* COMPONENT DETAIL */
+  .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  .comp-card { background: var(--card); border-radius: 10px; border: 1px solid var(--border); overflow: hidden; }
+  .comp-card-head { padding: 12px 16px; font-weight: 700; font-size: .92rem; display: flex; align-items: center; gap: 8px; }
+  .comp-card-body { padding: 12px 16px; font-size: .84rem; color: var(--muted); }
+  .comp-card-body ul { margin-left: 16px; }
+  .comp-card-body li { margin-bottom: 4px; }
+  .comp-card-body code { background: rgba(255,255,255,.07); padding: 1px 5px; border-radius: 3px; font-size: .82rem; color: #a8e6cf; }
+  .comp-card-body .fn { display: inline-block; margin: 3px 4px 3px 0; background: rgba(255,255,255,.06); padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: .8rem; color: #74b9ff; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: .72rem; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+
+  /* DECISION TABLE */
+  table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  th { background: var(--c2); padding: 10px 14px; text-align: left; font-weight: 600; }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(255,255,255,.03); }
+
+  /* DATA FLOW */
+  .df { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 14px; background: var(--card); border-radius: 10px; margin-bottom: 10px; }
+  .df-box { padding: 6px 14px; border-radius: 6px; font-size: .84rem; font-weight: 600; }
+  .df-arr { color: var(--muted); font-size: 1.1rem; }
+  .df-note { flex-basis: 100%; font-size: .78rem; color: var(--muted); margin-top: 4px; padding-left: 4px; }
+
+  /* COLORS */
+  .bg0{background:rgba(233,69,96,.15);border-color:var(--l0)}.co0{color:var(--l0)}
+  .bg1{background:rgba(245,166,35,.15);border-color:var(--l1)}.co1{color:var(--l1)}
+  .bg2{background:rgba(126,211,33,.15);border-color:var(--l2)}.co2{color:var(--l2)}
+  .bg3{background:rgba(74,144,226,.15);border-color:var(--l3)}.co3{color:var(--l3)}
+  .bg4{background:rgba(155,89,182,.15);border-color:var(--l4)}.co4{color:var(--l4)}
+  .bg5{background:rgba(26,188,156,.15);border-color:var(--l5)}.co5{color:var(--l5)}
+  .bg6{background:rgba(149,165,166,.15);border-color:var(--l6)}.co6{color:var(--l6)}
+  .bg7{background:rgba(230,126,34,.15);border-color:var(--l7)}.co7{color:var(--l7)}
+
+  .solid0{background:var(--l0)}.solid1{background:var(--l1)}.solid2{background:var(--l2)}
+  .solid3{background:var(--l3)}.solid4{background:var(--l4)}.solid5{background:var(--l5)}
+  .solid6{background:var(--l6)}.solid7{background:var(--l7)}
+
+  footer { text-align: center; padding: 24px; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--border); margin-top: 40px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 RPA Thu Ngân — Kiến trúc & Workflow Chi Tiết</h1>
+  <p>Hệ thống tự động hoá điền dữ liệu từ chứng từ vào Google Form / Excel / Access / App Desktop / Zalo &nbsp;·&nbsp; Generated 2026-06-24</p>
+</header>
+
+<nav>
+  <a href="#overview">Tổng quan</a>
+  <a href="#layers">Các lớp</a>
+  <a href="#flow-main">Luồng chính</a>
+  <a href="#ocr">OCR / LLM</a>
+  <a href="#targets">Đích điền</a>
+  <a href="#cache">Cache & Tối ưu</a>
+  <a href="#infra">Hạ tầng</a>
+  <a href="#data-flow">Luồng dữ liệu</a>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 1 — OVERVIEW
+════════════════════════════════════════════════════════════ -->
+<section id="overview">
+  <h2 class="co0" style="border-color:var(--l0)">📐 Tổng quan hệ thống</h2>
+
+  <p style="color:var(--muted);margin-bottom:20px;line-height:1.8">
+    App RPA Thu Ngân nhận đầu vào là <strong style="color:var(--text)">bất kỳ chứng từ nào</strong>
+    (ảnh chụp, PDF scan/điện tử, Excel, CSV, Word, JSON) và tự động điền vào một trong
+    <strong style="color:var(--text)">5 đích</strong>: Google Form, Excel báo cáo, Microsoft Access,
+    App desktop tuỳ ý, hoặc Zalo. Kiến trúc gồm <strong style="color:var(--text)">7 lớp</strong>
+    xếp chồng, mỗi lớp chỉ giao tiếp với lớp liền kề.
+  </p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l0)">
+      <div style="font-size:1.8rem">📄</div>
+      <div style="font-weight:700;margin:6px 0 2px">Đầu vào</div>
+      <div style="color:var(--muted);font-size:.82rem">PDF · Ảnh · Excel · CSV · Word · JSON</div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l1)">
+      <div style="font-size:1.8rem">🔍</div>
+      <div style="font-weight:700;margin:6px 0 2px">OCR / LLM</div>
+      <div style="color:var(--muted);font-size:.82rem">Gemini · OpenAI · Claude · Ollama</div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l2)">
+      <div style="font-size:1.8rem">🧠</div>
+      <div style="font-weight:700;margin:6px 0 2px">Schema</div>
+      <div style="color:var(--muted);font-size:.82rem">Soi form/Excel · Prompt động</div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l3)">
+      <div style="font-size:1.8rem">✍️</div>
+      <div style="font-weight:700;margin:6px 0 2px">Điền</div>
+      <div style="color:var(--muted);font-size:.82rem">Playwright · openpyxl · COM · UIA</div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l4)">
+      <div style="font-size:1.8rem">🖥️</div>
+      <div style="font-weight:700;margin:6px 0 2px">Giao diện</div>
+      <div style="color:var(--muted);font-size:.82rem">Tkinter GUI · CLI argparse</div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;text-align:center;border-top:3px solid var(--l5)">
+      <div style="font-size:1.8rem">⚡</div>
+      <div style="font-weight:700;margin:6px 0 2px">Tối ưu</div>
+      <div style="color:var(--muted);font-size:.82rem">OCR cache · Browser reuse · Chain fallback</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 2 — LAYERS
+════════════════════════════════════════════════════════════ -->
+<section id="layers">
+  <h2 class="co1" style="border-color:var(--l1)">🏗️ Các lớp kiến trúc</h2>
+
+  <div class="arch">
+
+    <!-- L0 -->
+    <div class="layer bg0">
+      <div class="layer-header">
+        <span class="badge solid0" style="color:#fff">L0</span>
+        <span class="co0">Entry Points — Điểm vào</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg0">
+          <div class="name">app_gui.py</div>
+          <div class="desc">Giao diện Tkinter. Người dùng chọn file, chọn đích, bấm Xem trước / Điền &amp; Nộp. Worker thread riêng tránh đóng băng UI.</div>
+          <div class="file">app_gui.py · class App</div>
+        </div>
+        <div class="module bg0">
+          <div class="name">autofill.py (CLI)</div>
+          <div class="desc">Entry point dòng lệnh với argparse. Hỗ trợ đầy đủ cờ: --form, --doc, --submit, --headed, --watch, --access, --profile, --zalo, --cua.</div>
+          <div class="file">autofill.py · main()</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L1 -->
+    <div class="layer bg1">
+      <div class="layer-header">
+        <span class="badge solid1" style="color:#000">L1</span>
+        <span class="co1">Orchestration — Điều phối</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg1">
+          <div class="name">run_form()</div>
+          <div class="desc">Soi form → OCR → chuẩn hoá → submit N bản ghi. Dùng shared browser khi N&gt;1.</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg1">
+          <div class="name">run_excel()</div>
+          <div class="desc">Inspect Excel header → OCR → append_row (openpyxl) hoặc append_row_visible (win32com --watch).</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg1">
+          <div class="name">run_access()</div>
+          <div class="desc">Load profile → OCR → fill_access qua COM. Hỗ trợ cả profile JSON và hardcode desktop_filler.</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg1">
+          <div class="name">run_profile()</div>
+          <div class="desc">Load profile JSON → OCR → fill_app bằng pywinauto UIA. Mỗi app là 1 file JSON trong profiles/.</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg1">
+          <div class="name">run_zalo()</div>
+          <div class="desc">OCR → format text → tìm cửa sổ Zalo → paste qua clipboard → gửi. Hỗ trợ gửi ảnh nhiều file.</div>
+          <div class="file">autofill.py</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L2 -->
+    <div class="layer bg2">
+      <div class="layer-header">
+        <span class="badge solid2" style="color:#000">L2</span>
+        <span class="co2">Schema Inspection — Đọc cấu trúc đích</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg2">
+          <div class="name">fetch_form()</div>
+          <div class="desc">Tải HTML Google Form, bóc biến JS <code>FB_PUBLIC_LOAD_DATA_</code>. Trả về title, fields (id/label/type/options), số trang. Không cần trình duyệt.</div>
+          <div class="file">inspect_form.py</div>
+        </div>
+        <div class="module bg2">
+          <div class="name">inspect_excel()</div>
+          <div class="desc">openpyxl đọc dòng header_row. Mỗi ô tiêu đề → field {id=colN, label, type, col}. Schema động — thêm cột tự nhận ra.</div>
+          <div class="file">excel_target.py</div>
+        </div>
+        <div class="module bg2">
+          <div class="name">load_profile()</div>
+          <div class="desc">Đọc profiles/*.json. Mỗi file = 1 app đích (window_title, exe, fields, submit_key). Thêm app mới không cần sửa code.</div>
+          <div class="file">desktop_profiles.py</div>
+        </div>
+        <div class="module bg2">
+          <div class="name">resolve_schema()</div>
+          <div class="desc">Wrapper cho fetch_form: luôn gọi _inspect_and_cache() mỗi phiên (không dùng cache file), lưu URL vào last_form.txt.</div>
+          <div class="file">autofill.py</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L3 -->
+    <div class="layer bg3">
+      <div class="layer-header">
+        <span class="badge solid3" style="color:#fff">L3</span>
+        <span class="co3">Document Ingestion — Đọc chứng từ</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg3">
+          <div class="name">file_to_pages()</div>
+          <div class="desc">Dispatcher theo extension. Trả list[("text"|"image", data, ?size)].</div>
+          <div class="file">doc_reader.py</div>
+        </div>
+        <div class="module bg3">
+          <div class="name">PDF điện tử</div>
+          <div class="desc">pdfplumber bóc text. Bảng → markdown. &gt;50 ký tự/trang → text thẳng (không tốn API vision).</div>
+          <div class="file">doc_reader.py · _pdf_page_text()</div>
+        </div>
+        <div class="module bg3">
+          <div class="name">PDF scan / Ảnh</div>
+          <div class="desc">fitz render ảnh 2x → OpenCV → base64. Gửi tới LLM dạng vision (inline_data).</div>
+          <div class="file">doc_reader.py</div>
+        </div>
+        <div class="module bg3">
+          <div class="name">Excel/CSV/Word/Text</div>
+          <div class="desc">openpyxl (xlsx), csv.reader (csv/tsv), zipfile xml (docx), Path.read_text (txt/json/md). Chuỗi cũ (.xls/.doc) → COM Office.</div>
+          <div class="file">doc_reader.py</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L4 -->
+    <div class="layer bg4">
+      <div class="layer-header">
+        <span class="badge solid4" style="color:#fff">L4</span>
+        <span class="co4">OCR / LLM Extraction — Trích xuất dữ liệu</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg4">
+          <div class="name">build_prompt()</div>
+          <div class="desc">Sinh prompt động từ schema: liệt kê id/label/type/options của từng trường. Kèm hướng dẫn đa bản ghi (trả JSON array nếu nhiều rows).</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">ChainOCRAdapter</div>
+          <div class="desc">Thử adapter theo thứ tự. Nếu adapter trước thất bại → in cảnh báo → thử adapter tiếp theo. Hiện: Gemini → OpenAI GPT-4o-mini.</div>
+          <div class="file">test_image_processing.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">GeminiOCRAdapter</div>
+          <div class="desc">Gọi Gemini API (generativelanguage.googleapis.com). Mặc định model gemini-2.5-flash-lite. retries=1 khi trong chain (fail nhanh).</div>
+          <div class="file">test_image_processing.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">OpenAIOCRAdapter</div>
+          <div class="desc">Gọi OpenAI API. Text + ảnh đưa vào content[]. Model mặc định gpt-4o-mini. Dùng làm fallback của Gemini.</div>
+          <div class="file">test_image_processing.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">ClaudeOCRAdapter</div>
+          <div class="desc">Gọi Anthropic API. Model mặc định claude-haiku. Tuỳ chọn khi đặt OCR_PROVIDER=claude.</div>
+          <div class="file">test_image_processing.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">OllamaOCRAdapter</div>
+          <div class="desc">Gọi Ollama local (http://localhost:11434). Không cần API key. Model mặc định llava. Dùng offline.</div>
+          <div class="file">test_image_processing.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">extract_values()</div>
+          <div class="desc">Gọi adapter, parse JSON trả về, phát hiện đa bản ghi (array vs object). Cache kết quả theo (path, mtime, fields_hash) tránh OCR lại khi preview→submit.</div>
+          <div class="file">autofill.py</div>
+        </div>
+        <div class="module bg4">
+          <div class="name">_normalize_record()</div>
+          <div class="desc">Chuẩn hoá từng bản ghi: ngày → DD/MM/YYYY, radio/dropdown → khớp option (NFC+lower), số với 0 đứng đầu → giữ text. Báo issues cho trường bắt buộc trống.</div>
+          <div class="file">autofill.py</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L5 -->
+    <div class="layer bg5">
+      <div class="layer-header">
+        <span class="badge solid5" style="color:#000">L5</span>
+        <span class="co5">Target Fillers — Điền vào đích</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg5">
+          <div class="name">form_filler · Playwright</div>
+          <div class="desc">Bậc 3. Mở Chrome headless, điền từng trường qua selector DOM, bấm Tiếp (multi-page), bấm Gửi, xác nhận URL formResponse. Chụp ảnh màn hình kết quả.</div>
+          <div class="file">form_filler.py · fill_and_submit_browser()</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">browser_context()</div>
+          <div class="desc">Context manager chia sẻ 1 instance Chrome cho N bản ghi. Tiết kiệm ~2-3s/bản ghi từ bản ghi thứ 2 (không mở/đóng browser lại).</div>
+          <div class="file">form_filler.py</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">cua_fallback · CUA</div>
+          <div class="desc">Bậc 4. Fallback khi Playwright DOM gãy. Gemini Vision nhìn ảnh chụp form → trả bounding box từng ô → Playwright click theo toạ độ pixel.</div>
+          <div class="file">cua_fallback.py · cua_fill_web()</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">excel_target · openpyxl</div>
+          <div class="desc">Bậc 1 (nhanh nhất). Ghi thẳng vào file xlsx không mở Excel. Tìm dòng cuối → append. Xử lý số 0 đầu (format text "@").</div>
+          <div class="file">excel_target.py · append_row()</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">excel_com · win32com</div>
+          <div class="desc">Bậc 2 (--watch). Mở Excel THẬT hiển thị. Goto từng ô, Select, ghi giá trị, sleep 0.6s để thấy điền. Ngày → số sê-ri tránh lệch múi giờ -7h.</div>
+          <div class="file">excel_com.py · append_row_visible()</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">access_filler · COM</div>
+          <div class="desc">Dispatch("Access.Application"). Mở CSDL + form. Điền từng ô qua COM object model Access. Lưu bằng Shift+Enter.</div>
+          <div class="file">access_filler.py · fill_access()</div>
+        </div>
+        <div class="module bg5">
+          <div class="name">desktop_filler · pywinauto</div>
+          <div class="desc">UIAutomation cho app Windows không có API. Tìm cửa sổ theo title regex → điền ô theo auto_id/name → clipboard paste → verify read-back.</div>
+          <div class="file">desktop_filler.py · fill_app()</div>
+        </div>
+        <div class="module bg5">
+          <div name="name">Zalo Sender</div>
+          <div class="desc">Tìm cửa sổ Zalo → focus → gõ tên liên hệ vào ô tìm kiếm → click → paste text qua win32clipboard → Enter gửi. Ảnh gửi bằng drag-drop vào chat.</div>
+          <div class="file">zalo_demo.py / zalo_send_invoice.py</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:1.2rem;color:var(--muted);padding:2px 0">↓</div>
+
+    <!-- L6 -->
+    <div class="layer bg6">
+      <div class="layer-header">
+        <span class="badge solid6" style="color:#000">L6</span>
+        <span class="co6">Infrastructure — Hạ tầng</span>
+      </div>
+      <div class="layer-body">
+        <div class="module bg6">
+          <div class="name">_bootstrap.py</div>
+          <div class="desc">Import đầu tiên ở mọi script. 3 việc: đẩy temp sang ổ D (tránh C: đầy), thêm thư mục cha vào sys.path, nạp .env (GEMINI_API_KEY, OCR_PROVIDER...).</div>
+          <div class="file">_bootstrap.py</div>
+        </div>
+        <div class="module bg6">
+          <div class="name">OCR Session Cache</div>
+          <div class="desc">Dict _ocr_cache trong RAM, key=(path, mtime, fields_hash). Preview và Submit dùng chung → LLM chỉ gọi 1 lần/phiên/file.</div>
+          <div class="file">autofill.py · _ocr_cache</div>
+        </div>
+        <div class="module bg6">
+          <div class="name">CSV Column Mapping</div>
+          <div class="desc">Sidecar file &lt;stem&gt;.map.json ánh xạ tên cột CSV → field id form. Nếu không khớp tự sinh template để user điền. Áp dụng trong read_data_file().</div>
+          <div class="file">autofill.py · _map_raw_to_fields()</div>
+        </div>
+        <div class="module bg6">
+          <div class="name">Schema Cache (disk)</div>
+          <div class="desc">Lưu JSON schema vào .rpa_cache/. Mỗi phiên vẫn gọi fetch_form() để soi lại (không đọc cache file), nhưng ghi lại để debug/tham khảo.</div>
+          <div class="file">autofill.py · save_schema()</div>
+        </div>
+        <div class="module bg6">
+          <div class="name">HTTP Retry + Backoff</div>
+          <div class="desc">_http_post() với exponential backoff. 429 quota → dừng ngay. 429 rate-limit → đọc retryDelay từ response. 4xx khác (404...) → break ngay. 500/503 → retry.</div>
+          <div class="file">test_image_processing.py · _http_post()</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 3 — MAIN FLOW
+════════════════════════════════════════════════════════════ -->
+<section id="flow-main">
+  <h2 class="co2" style="border-color:var(--l2)">🔄 Luồng thực thi chính (Google Form)</h2>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid0" style="color:#fff">1</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg0">
+        <h4>Người dùng bấm nút (GUI) hoặc chạy CLI</h4>
+        <p>GUI: App.run(submit) đọc widget → đóng gói params tuple → spawn threading.Thread(_worker). CLI: argparse parse args → dispatch(a).</p>
+        <div class="sub">params = (target, extra, submit, headed, watch)</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid1" style="color:#000">2</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg1">
+        <h4>Mở rộng file đầu vào (multi-record expansion)</h4>
+        <p>_worker duyệt danh sách file. File CSV/JSON/TSV (nếu đích ≠ Zalo) → đọc thành list[dict] bằng read_data_file(). N rows → N mục. File ảnh/PDF/Word → giữ nguyên path. Mọi dict hàng được inject __csv_path__.</p>
+        <div class="sub">expanded = [dict_row1, dict_row2, ..., "path/img.jpg", ...]</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid2" style="color:#000">3</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg2">
+        <h4>Soi Google Form — resolve_schema()</h4>
+        <p>Mỗi phiên luôn gọi fetch_form() (không đọc cache file). urllib tải HTML form → bóc biến FB_PUBLIC_LOAD_DATA_ → parse JS array → trích title, fields, số trang. Lưu schema file + lưu URL dùng lần sau.</p>
+        <div class="sub">fields = [{id:"entry.123", label:"Họ tên", type:"text", required:True}, ...]</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid3" style="color:#fff">4</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg3">
+        <h4>Đọc chứng từ — file_to_pages()</h4>
+        <p>Phân nhánh theo extension:</p>
+        <ul>
+          <li><strong>.pdf</strong> → pdfplumber text (nếu &gt;50 ký tự) hoặc fitz render → ảnh base64</li>
+          <li><strong>.jpg/.png/...</strong> → OpenCV process → base64</li>
+          <li><strong>.xlsx/.csv/.docx/.json/...</strong> → đọc thẳng thành text/markdown</li>
+          <li><strong>dict (CSV row)</strong> → bỏ qua bước này, đi thẳng sang L4b</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid4" style="color:#fff">5</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg4">
+        <h4>OCR / LLM trích xuất — extract_values()</h4>
+        <p>Kiểm tra _ocr_cache: nếu hit → trả ngay (preview→submit dùng chung). Nếu miss:</p>
+        <ul>
+          <li>build_prompt(fields, doc_text) → prompt liệt kê đúng các id/label/type form</li>
+          <li>ChainOCRAdapter.ocr() → Gemini trước (retries=1), nếu fail → OpenAI GPT-4o-mini</li>
+          <li>_strip_json() bóc JSON thuần (loại ``` fence, tìm [{...}])</li>
+          <li>Nếu LLM trả array → đa bản ghi (multi_records); nếu object → 1 bản ghi</li>
+          <li>Kết quả lưu vào _ocr_cache</li>
+        </ul>
+        <div class="sub">result = [{"entry.123": "Nguyễn Văn A", "entry.456": "12/03/1984", ...}, ...]</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle" style="background:var(--l4);color:#fff">5b</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg4">
+        <h4>Chuẩn hoá — _normalize_record() [nếu doc là dict từ CSV]</h4>
+        <p>Áp dụng .map.json nếu có. _map_raw_to_fields() ánh xạ tên cột CSV → entry id (exact → NFC+lower → .map.json). normalize_value() chuẩn hoá ngày, khớp option radio/dropdown bằng skeleton matching.</p>
+        <div class="sub">items = [{...field_meta, "value": "Nguyễn Văn A"}, ...]   issues = []</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid5" style="color:#000">6</div>
+        <div class="flow-line"></div>
+      </div>
+      <div class="flow-content bg5">
+        <h4>Điền form — _submit_form_record()</h4>
+        <p>Nếu N &gt; 1 bản ghi: mở 1 Chrome qua browser_context() dùng chung. Với mỗi bản ghi: gọi fill_and_submit_browser() với shared browser → mở tab mới, điền, đóng tab.</p>
+        <ul>
+          <li>page.goto(form_url) → wait_for_selector("[role='button']")</li>
+          <li>Duyệt trang: _try_fill_field() → bấm Tiếp (chờ nút cũ hidden + nút mới xuất hiện) → bấm Gửi</li>
+          <li>_confirm_submitted(): wait_for_url(formResponse) — nếu không rời được form → bóc lỗi xác thực</li>
+          <li>Chụp ảnh màn hình vào screenshots/</li>
+          <li>Nếu Playwright thất bại → fallback CUA (Gemini Vision nhìn pixel)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">
+        <div class="flow-circle solid6">✓</div>
+        <div class="flow-line" style="opacity:0"></div>
+      </div>
+      <div class="flow-content bg6">
+        <h4>Tổng kết</h4>
+        <p>In N/M bản ghi thành công. Trả mã 0 (tất cả OK) hoặc 1 (có lỗi). GUI mở khoá nút.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 4 — OCR DETAIL
+════════════════════════════════════════════════════════════ -->
+<section id="ocr">
+  <h2 class="co4" style="border-color:var(--l4)">🔬 Chi tiết lớp OCR / LLM</h2>
+
+  <h3>Các provider và cấu hình</h3>
+  <table>
+    <thead><tr><th>Provider</th><th>Class</th><th>Model mặc định</th><th>Biến .env</th><th>Dùng khi</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge" style="background:rgba(26,188,156,.3);color:#1abc9c">GEMINI</span></td><td><code>GeminiOCRAdapter</code></td><td>gemini-2.5-flash-lite</td><td>GEMINI_API_KEY<br>MODEL_GEMINI=flashlite</td><td>Mặc định (primary)</td></tr>
+      <tr><td><span class="badge" style="background:rgba(116,185,255,.3);color:#74b9ff">OPENAI</span></td><td><code>OpenAIOCRAdapter</code></td><td>gpt-4o-mini</td><td>OPENAI_API_KEY<br>MODEL_OPENAI=gpt-4o-mini</td><td>Fallback khi Gemini fail</td></tr>
+      <tr><td><span class="badge" style="background:rgba(253,121,168,.3);color:#fd79a8">CLAUDE</span></td><td><code>ClaudeOCRAdapter</code></td><td>claude-haiku</td><td>ANTHROPIC_API_KEY</td><td>OCR_PROVIDER=claude</td></tr>
+      <tr><td><span class="badge" style="background:rgba(129,236,236,.3);color:#00cec9">OLLAMA</span></td><td><code>OllamaOCRAdapter</code></td><td>llava</td><td>OLLAMA_BASE_URL</td><td>Offline, không cần key</td></tr>
+      <tr><td><span class="badge" style="background:rgba(149,165,166,.3);color:#95a5a6">MOCK</span></td><td><code>MockOCRAdapter</code></td><td>—</td><td>—</td><td>OCR_PROVIDER=mock (test)</td></tr>
+      <tr><td><span class="badge" style="background:rgba(108,52,131,.3);color:#a29bfe">CHAIN</span></td><td><code>ChainOCRAdapter</code></td><td>—</td><td>—</td><td>Auto khi có cả 2 key</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:24px">Luồng retry + fallback</h3>
+  <div class="comp-grid">
+    <div class="comp-card">
+      <div class="comp-card-head bg4">🔁 Retry trong 1 model (HTTP layer)</div>
+      <div class="comp-card-body">
+        <ul>
+          <li>MAX_API_RETRIES = 3 (standalone), <strong>retries=1 khi trong chain</strong></li>
+          <li>429 quota → <code>break</code> ngay, không retry</li>
+          <li>429 rate-limit → đọc <code>retryDelay</code> từ response JSON</li>
+          <li>404/4xx → <code>break</code> ngay</li>
+          <li>500/503 → retry với backoff 2^n giây</li>
+          <li>Timeout/exception mạng → retry</li>
+        </ul>
+      </div>
+    </div>
+    <div class="comp-card">
+      <div class="comp-card-head bg4">🔄 Cross-provider fallback (Chain layer)</div>
+      <div class="comp-card-body">
+        <ul>
+          <li>ChainOCRAdapter thử lần lượt từng adapter</li>
+          <li>Adapter đầu (Gemini) fail → in cảnh báo + error detail</li>
+          <li>Chuyển sang adapter sau (OpenAI)</li>
+          <li>GEMINI_MODEL_FALLBACK = [] (không thử model Gemini khác)</li>
+          <li>Kết quả thành công được cache chung</li>
+        </ul>
+      </div>
+    </div>
+    <div class="comp-card">
+      <div class="comp-card-head bg4">🧩 Prompt engineering</div>
+      <div class="comp-card-body">
+        <ul>
+          <li>Schema-driven: prompt liệt kê <em>đúng</em> các trường form cần</li>
+          <li>Ngày yêu cầu DD/MM/YYYY, option phải khớp danh sách cho sẵn</li>
+          <li>Đa bản ghi: yêu cầu trả <code>[{...}, {...}]</code> nếu nhiều records</li>
+          <li>temperature=0.1 (nhất quán, ít sáng tạo)</li>
+          <li>Text file: nhúng nội dung vào prompt (không gửi ảnh)</li>
+          <li>Image: gửi base64 inline_data jpeg</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 5 — TARGETS
+════════════════════════════════════════════════════════════ -->
+<section id="targets">
+  <h2 class="co5" style="border-color:var(--l5)">🎯 Chi tiết các đích điền</h2>
+
+  <div class="comp-grid">
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">🌐 Google Form — Playwright</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> Mở Chrome thật (headless hoặc có UI), điền qua DOM selector.</p>
+        <ul>
+          <li>Tìm câu hỏi bằng <code>div[role='listitem']</code> filter <code>has_text=label</code></li>
+          <li>text/paragraph → <code>textbox.fill()</code></li>
+          <li>date → <code>input[type="date"].fill()</code> + điền Giờ/Phút nếu có</li>
+          <li>radio/scale → <code>get_by_role("radio", name=val).click()</code></li>
+          <li>dropdown → click listbox → click option</li>
+          <li>Multi-page: bấm "Tiếp" → chờ nút cũ hidden → chờ nút mới</li>
+          <li>Xác nhận: <code>wait_for_url(formResponse)</code> timeout 12s</li>
+          <li>Thất bại → bóc lỗi xác thực từ DOM → fallback CUA</li>
+          <li><strong>Multi-record:</strong> 1 browser, N tab tuần tự</li>
+        </ul>
+        <div class="fn">fill_and_submit_browser()</div>
+        <div class="fn">browser_context()</div>
+        <div class="fn">_try_fill_field()</div>
+        <div class="fn">_confirm_submitted()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">🤖 Google Form — CUA Fallback</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> Gemini Vision nhìn ảnh chụp form, trả toạ độ pixel.</p>
+        <ul>
+          <li>Chụp ảnh trang form → base64</li>
+          <li>Prompt hỏi Gemini: "tìm các ô sau, trả bounding box 0-1000"</li>
+          <li>Parse JSON toạ độ → chuyển sang CSS pixel</li>
+          <li>Playwright click/type theo toạ độ (không dùng selector)</li>
+          <li>Tái thử nếu hộp không tìm thấy</li>
+          <li>Bậc 4 — chỉ kích hoạt khi Playwright thất bại</li>
+        </ul>
+        <div class="fn">cua_fill_web()</div>
+        <div class="fn">_ask_boxes()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">📊 Excel — openpyxl (nhanh)</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> Bậc 1. Ghi file trực tiếp, không mở Excel.</p>
+        <ul>
+          <li>inspect_excel() đọc header row → fields [{id=colN, col, type}]</li>
+          <li>Schema động: thêm/xóa cột tự nhận ra</li>
+          <li>max_row + 1 → append dòng mới</li>
+          <li>_coerce(): ngày → datetime.date, số nguyên → int, text → str</li>
+          <li>Số 0 đứng đầu (MST, số HĐ) → giữ text</li>
+          <li>Lưu file sau khi ghi</li>
+        </ul>
+        <div class="fn">inspect_excel()</div>
+        <div class="fn">append_row()</div>
+        <div class="fn">_coerce()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">👁️ Excel — win32com (xem được)</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> Bậc 2 (--watch). Mở Excel thật, hiện từng ô điền.</p>
+        <ul>
+          <li>Dispatch("Excel.Application") → Visible=True</li>
+          <li>xlUp trick tìm dòng cuối thực sự</li>
+          <li>Goto(cell, True) → cuộn + chọn ô</li>
+          <li><strong>Ngày → số sê-ri</strong> (val - date(1899,12,30)).days tránh lệch UTC+7</li>
+          <li>text → NumberFormat="@" trước khi ghi</li>
+          <li>sleep(0.6) mỗi ô để nhìn thấy</li>
+          <li>wb.Save() và giữ Excel mở (keep_open=True)</li>
+        </ul>
+        <div class="fn">append_row_visible()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">🗄️ Microsoft Access — COM</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> COM API của Access (ổn định hơn UIA).</p>
+        <ul>
+          <li>Dispatch("Access.Application") tái dùng nếu đang mở</li>
+          <li>Kiểm tra CurrentDb() trước khi OpenCurrentDatabase()</li>
+          <li>AllForms.Item(0) tự lấy form đầu tiên nếu không chỉ định</li>
+          <li>Điền từng trường qua COM Controls</li>
+          <li>Lưu bằng Shift+Enter (không có nút Lưu)</li>
+          <li>Cấu hình qua profile JSON hoặc desktop_filler.py</li>
+        </ul>
+        <div class="fn">fill_access()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">🖥️ App Desktop — pywinauto UIA</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> UIAutomation cho app không có COM API.</p>
+        <ul>
+          <li>Tìm cửa sổ theo title_re (regex)</li>
+          <li>force_front() đưa lên foreground</li>
+          <li>Điền ô theo auto_id hoặc name</li>
+          <li>set_clipboard() + Ctrl+A+V paste (hỗ trợ Unicode tiếng Việt)</li>
+          <li>read_value() verify sau khi điền</li>
+          <li>Nút submit: keys (+{ENTER}) hoặc click theo id/name</li>
+          <li>Cấu hình trong profiles/*.json</li>
+        </ul>
+        <div class="fn">fill_app()</div>
+        <div class="fn">force_front()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg5">💬 Zalo</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px"><strong>Cơ chế:</strong> Tự động hoá UI Zalo PC bằng pywinauto.</p>
+        <ul>
+          <li>Tìm cửa sổ Zalo (win32gui + pywinauto)</li>
+          <li>Gõ tên vào contact-search-input</li>
+          <li>Click vào kết quả tìm kiếm</li>
+          <li>Paste nội dung vào richInput qua clipboard</li>
+          <li>Enter gửi text</li>
+          <li>Gửi ảnh: kéo thả file vào vùng chat</li>
+          <li>Hỗ trợ nhiều ảnh liên tiếp</li>
+        </ul>
+        <div class="fn">zalo_send()</div>
+        <div class="fn">set_clipboard()</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 6 — CACHE & OPTIMIZATION
+════════════════════════════════════════════════════════════ -->
+<section id="cache">
+  <h2 class="co7" style="border-color:var(--l7)">⚡ Cache &amp; Tối ưu hiệu năng</h2>
+
+  <div class="comp-grid">
+
+    <div class="comp-card">
+      <div class="comp-card-head bg7">🧠 OCR Session Cache</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px">Tránh gọi LLM 2 lần cho cùng 1 file trong 1 phiên (Xem trước → Điền &amp; Nộp).</p>
+        <ul>
+          <li>Key = <code>(doc_path, mtime, fields_hash_8chars)</code></li>
+          <li>fields_hash: MD5 của list entry_id (nhận biết form đổi)</li>
+          <li>Mtime đổi → cache miss (file bị sửa)</li>
+          <li>Tự động, transparent với caller</li>
+          <li>Chỉ cache khi success</li>
+        </ul>
+        <div class="fn">_cache_key()</div>
+        <div class="fn">extract_values()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg7">🌐 Browser Reuse (Multi-record)</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px">Khi nộp N &gt; 1 bản ghi lên Google Form, chỉ mở Chrome 1 lần.</p>
+        <ul>
+          <li><code>browser_context()</code>: context manager giữ browser sống</li>
+          <li>Mỗi bản ghi: mở tab mới, điền, đóng tab</li>
+          <li>Tiết kiệm ~2-3s/bản ghi từ bản ghi thứ 2</li>
+          <li>Chỉ áp dụng khi N &gt; 1 và không dùng CUA</li>
+          <li>Browser tự đóng khi context manager thoát</li>
+        </ul>
+        <div class="fn">browser_context()</div>
+        <div class="fn">run_form()</div>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg7">🔀 Maker-Checker Pattern</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px">2 bước: Xem trước (không gửi) → Điền &amp; Nộp (gửi thật).</p>
+        <ul>
+          <li>Xem trước: submit=False → OCR + hiện giá trị, KHÔNG mở browser form</li>
+          <li>Điền &amp; Nộp: submit=True → dùng OCR cache → mở browser → điền</li>
+          <li>Xác nhận dialog trước khi nộp thật</li>
+          <li>LLM chỉ gọi 1 lần nhờ _ocr_cache</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg7">📄 PDF Text-First Strategy</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px">Tránh tốn API vision token cho PDF đã có text layer.</p>
+        <ul>
+          <li>pdfplumber bóc text từng trang trước</li>
+          <li>&gt;50 ký tự → gửi text (rẻ, nhanh, chính xác hơn)</li>
+          <li>≤50 ký tự → PDF scan → fitz render 2x → gửi ảnh</li>
+          <li>Bảng trong PDF → chuyển thành markdown table</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-card-head bg7">⏱️ Playwright Navigation Optimization</div>
+      <div class="comp-card-body">
+        <p style="margin-bottom:8px">Thay chờ cứng 900ms bằng chờ sự kiện thực.</p>
+        <ul>
+          <li>Sau bấm Tiếp: <code>next_b.wait_for(state="hidden", 3s)</code></li>
+          <li>Rồi: <code>wait_for_selector("[role='button']", 5s)</code></li>
+          <li>Chờ đúng animation xong, không chờ dư</li>
+          <li>Tiết kiệm 0.5-0.7s/trang trung bình</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 7 — INFRASTRUCTURE
+════════════════════════════════════════════════════════════ -->
+<section id="infra">
+  <h2 class="co6" style="border-color:var(--l6)">🔧 Hạ tầng &amp; Cấu hình</h2>
+
+  <h3>Biến môi trường (.env)</h3>
+  <table>
+    <thead><tr><th>Biến</th><th>Giá trị mẫu</th><th>Mô tả</th></tr></thead>
+    <tbody>
+      <tr><td><code>OCR_PROVIDER</code></td><td>gemini</td><td>Provider chính: gemini | openai | claude | ollama | gcv | mock</td></tr>
+      <tr><td><code>GEMINI_API_KEY</code></td><td>AIza...</td><td>Google AI Studio API key</td></tr>
+      <tr><td><code>OPENAI_API_KEY</code></td><td>sk-...</td><td>OpenAI API key. Có key → tự bật fallback chain Gemini→OpenAI</td></tr>
+      <tr><td><code>MODEL_GEMINI</code></td><td>flashlite</td><td>flashlite | flash | pro. Default: flashlite (gemini-2.5-flash-lite)</td></tr>
+      <tr><td><code>MODEL_OPENAI</code></td><td>gpt-4o-mini</td><td>gpt-4o | gpt-4o-mini</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>sk-ant-...</td><td>Claude API key</td></tr>
+      <tr><td><code>OLLAMA_BASE_URL</code></td><td>http://localhost:11434</td><td>Ollama server URL (local)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:24px">File và thư mục quan trọng</h3>
+  <table>
+    <thead><tr><th>Đường dẫn</th><th>Mô tả</th></tr></thead>
+    <tbody>
+      <tr><td><code>.env</code> (thư mục cha)</td><td>API keys, OCR_PROVIDER. Không commit.</td></tr>
+      <tr><td><code>.rpa_cache/</code></td><td>Schema JSON của mỗi form (lưu để debug, không dùng cache khi chạy)</td></tr>
+      <tr><td><code>.rpa_cache/last_form.txt</code></td><td>URL form gần nhất dùng cho lần sau không cần --form</td></tr>
+      <tr><td><code>screenshots/</code></td><td>Ảnh chụp màn hình sau mỗi lần submit form (kèm _FAIL nếu thất bại)</td></tr>
+      <tr><td><code>profiles/*.json</code></td><td>Cấu hình mỗi app desktop đích. Copy _template.json để thêm app mới.</td></tr>
+      <tr><td><code>&lt;data&gt;.map.json</code></td><td>Ánh xạ tên cột CSV → entry id form. Tự sinh template khi không khớp.</td></tr>
+      <tr><td><code>_tmp/</code></td><td>Temp files (Chrome, OpenCV...) chuyển sang ổ D tránh C: đầy.</td></tr>
+      <tr><td><code>bao_cao.xlsx</code></td><td>File Excel báo cáo mặc định. make_template() tạo nếu chưa có.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SECTION 8 — DATA FLOW
+════════════════════════════════════════════════════════════ -->
+<section id="data-flow">
+  <h2 class="co3" style="border-color:var(--l3)">📊 Luồng dữ liệu theo từng đích</h2>
+
+  <h3>Google Form</h3>
+  <div class="df">
+    <div class="df-box bg3">Chứng từ (file)</div><span class="df-arr">→</span>
+    <div class="df-box bg3">file_to_pages()</div><span class="df-arr">→</span>
+    <div class="df-box bg4">LLM (Gemini→OpenAI)</div><span class="df-arr">→</span>
+    <div class="df-box bg4">list[dict raw]</div><span class="df-arr">→</span>
+    <div class="df-box bg4">_normalize_record()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">items list</div><span class="df-arr">→</span>
+    <div class="df-box bg5">Playwright Chrome</div><span class="df-arr">→</span>
+    <div class="df-box bg2">formResponse ✓</div>
+    <div class="df-note">Schema từ fetch_form() quyết định những gì cần trích xuất và cách fill</div>
+  </div>
+
+  <h3>Excel (openpyxl)</h3>
+  <div class="df">
+    <div class="df-box bg3">Chứng từ</div><span class="df-arr">→</span>
+    <div class="df-box bg4">LLM</div><span class="df-arr">→</span>
+    <div class="df-box bg4">_normalize_record()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">values_by_id dict</div><span class="df-arr">→</span>
+    <div class="df-box bg5">_coerce()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">ws.cell(row, col) = val</div><span class="df-arr">→</span>
+    <div class="df-box bg2">wb.save() ✓</div>
+    <div class="df-note">Schema từ inspect_excel(): header row → fields. Không cần cấu hình thêm.</div>
+  </div>
+
+  <h3>CSV trực tiếp → Google Form</h3>
+  <div class="df">
+    <div class="df-box bg3">file.csv</div><span class="df-arr">→</span>
+    <div class="df-box bg1">read_data_file()</div><span class="df-arr">→</span>
+    <div class="df-box bg1">apply .map.json</div><span class="df-arr">→</span>
+    <div class="df-box bg1">N dict rows (bypass OCR)</div><span class="df-arr">→</span>
+    <div class="df-box bg4">_map_raw_to_fields()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">N × fill_and_submit()</div><span class="df-arr">→</span>
+    <div class="df-box bg2">N formResponse ✓</div>
+    <div class="df-note">CSV row bypass hoàn toàn LLM. Cần .map.json nếu tên cột không khớp entry id.</div>
+  </div>
+
+  <h3>Access</h3>
+  <div class="df">
+    <div class="df-box bg3">Chứng từ</div><span class="df-arr">→</span>
+    <div class="df-box bg4">LLM</div><span class="df-arr">→</span>
+    <div class="df-box bg4">_normalize_record()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">values_by_key</div><span class="df-arr">→</span>
+    <div class="df-box bg5">_coerce() (amount→int)</div><span class="df-arr">→</span>
+    <div class="df-box bg5">COM Controls.Item(key)</div><span class="df-arr">→</span>
+    <div class="df-box bg2">Shift+Enter lưu ✓</div>
+    <div class="df-note">Schema từ desktop_filler.py FIELDS hoặc profile JSON. key = UIA Name của control.</div>
+  </div>
+
+  <h3>Zalo</h3>
+  <div class="df">
+    <div class="df-box bg3">Chứng từ / Ảnh</div><span class="df-arr">→</span>
+    <div class="df-box bg4">LLM (text OCR)</div><span class="df-arr">→</span>
+    <div class="df-box bg1">format_message()</div><span class="df-arr">→</span>
+    <div class="df-box bg5">clipboard paste</div><span class="df-arr">→</span>
+    <div class="df-box bg5">richInput + Enter</div><span class="df-arr">→</span>
+    <div class="df-box bg2">Tin nhắn gửi ✓</div>
+    <div class="df-note">Ảnh: drag-drop vào chat window. Text: clipboard (win32clipboard giữ Unicode tiếng Việt).</div>
+  </div>
+
+</section>
+
+</main>
+
+<footer>
+  RPA Thu Ngân · Workflow Report · <strong>2026-06-24</strong> · Auto-generated from source analysis
+</footer>
+
+</body>
+</html>
