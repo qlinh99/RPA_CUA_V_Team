@@ -237,19 +237,28 @@ def _extract_items(doc: str, fields: "list[dict]"):
     """OCR chứng từ + chuẩn hoá -> (items có 'value', danh sách issues)."""
     print(f"\n🧾 OCR chứng từ: {doc}")
     raw = extract_values(doc, fields)
-    items, issues = [], []
+    items, issues, optional_empty = [], [], []
     for f in fields:
         val, err = normalize_value(raw.get(_fid(f)), f)
         items.append({**f, "value": val})
         if val in (None, "", []):
-            issues.append(f"{f['label']}: trống" + (f" ({err})" if err else ""))
+            # CHỈ chặn nếu trường BẮT BUỘC; trường tùy chọn để trống là hợp lệ.
+            if f.get("required"):
+                issues.append(f"{f['label']}: BẮT BUỘC nhưng trống"
+                              + (f" ({err})" if err else ""))
+            else:
+                optional_empty.append(f["label"])
         elif err:
             issues.append(f"{f['label']}: {err}")
     print("\n📋 Giá trị trích xuất:")
     for it in items:
-        print(f"   • {it['label']:<24} = {it['value']!r}")
+        req = " *" if it.get("required") else ""
+        print(f"   • {it['label']:<24}{req} = {it['value']!r}")
+    if optional_empty:
+        print("\nℹ️  Trường tùy chọn để trống (bỏ qua, không chặn): "
+              + ", ".join(optional_empty))
     if issues:
-        print("\n⚠️  Cần kiểm tra tay:")
+        print("\n⚠️  Cần kiểm tra tay (chặn gửi):")
         for i in issues:
             print(f"   - {i}")
     return items, issues
@@ -264,7 +273,8 @@ def run_form(args) -> int:
     skipped = [f for f in fields if f["type"] not in SUPPORTED]
     fields = [f for f in fields if f["type"] in SUPPORTED]
     for f in skipped:
-        print(f"   ⏭️  Bỏ qua trường kiểu '{f['type']}' (chưa hỗ trợ): {f['label']}")
+        warn = " ⚠️ BẮT BUỘC → Google sẽ chặn gửi!" if f.get("required") else ""
+        print(f"   ⏭️  Bỏ qua trường kiểu '{f['type']}' (chưa hỗ trợ): {f['label']}{warn}")
 
     items, issues = _extract_items(args.doc, fields)
 
