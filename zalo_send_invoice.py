@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Gửi thông tin hoá đơn (OCR từ ảnh/PDF) vào khung chat Zalo của người chỉ định.
-Kết hợp: OCR (hoadon_to_form.extract_invoice) + điều khiển Zalo (zalo_demo).
+Gửi thông tin chứng từ (OCR từ ảnh/PDF) vào khung chat Zalo của người chỉ định.
+Nội dung tin nhắn TỰ ĐỔI theo tài liệu (hoá đơn / phiếu bệnh nhân / phiếu thu...),
+không khoá vào 9 trường hoá đơn — dùng trích xuất động (doc_extract.extract_dynamic).
 
-Luồng: OCR hoá đơn → mở Zalo → mở khoá → tìm người → mở chat → DÁN nội dung → (tuỳ chọn) GỬI.
+Luồng: OCR động → mở Zalo → mở khoá → tìm người → mở chat → DÁN nội dung → (tuỳ chọn) GỬI.
 
 Chạy:
   # DÁN vào ô chat để xem trước, KHÔNG gửi:
@@ -20,19 +21,7 @@ import sys
 import time
 
 from zalo_demo import enter_zalo, open_chat, read_value
-from hoadon_to_form import extract_invoice
-
-
-def format_invoice(inv: dict) -> str:
-    """Định dạng 1 tin nhắn (nhiều dòng) từ dict 9 trường hoá đơn."""
-    return "\n".join([
-        f"HOÁ ĐƠN {inv.get('so_hoa_don', '')} ({inv.get('ky_hieu', '')})",
-        f"Ngày lập: {inv.get('ngay_lap', '')}",
-        f"NCC: {inv.get('ten_ncc', '')} - MST {inv.get('mst_ncc', '')}",
-        f"Diễn giải: {inv.get('dien_giai', '')}",
-        f"Trước thuế: {inv.get('tien_truoc_thue', '')}  |  Thuế: {inv.get('thue_suat', '')}",
-        f"Tổng thanh toán: {inv.get('tong_thanh_toan', '')}",
-    ])
+from doc_extract import extract_dynamic, format_message
 
 
 def set_clipboard(text: str) -> None:
@@ -105,14 +94,12 @@ def run(name: str, doc: str, do_send: bool = False) -> int:
     """OCR hoá đơn -> mở Zalo -> mở chat 'name' -> dán nội dung -> (tuỳ chọn) gửi."""
     from pywinauto.keyboard import send_keys
 
-    # 1) OCR hoá đơn -> dict 9 trường -> tin nhắn
-    print(f"🧾 OCR hoá đơn: {doc}")
-    inv = extract_invoice(doc)
-    issues = inv.pop("_issues", [])
-    msg = format_invoice(inv)
-    print("\n--- TIN NHẮN ---\n" + msg + "\n----------------")
-    if issues:
-        print("⚠️  Trường thiếu/không chắc:", issues)
+    # 1) OCR ĐỘNG: tin nhắn tự đổi theo nội dung ảnh/PDF (hoá đơn, phiếu BN, phiếu thu...)
+    print(f"🧾 OCR (động) chứng từ: {doc}")
+    data = extract_dynamic(doc)
+    msg = format_message(data)
+    print(f"\n--- TIN NHẮN ({data.get('loai_tai_lieu') or 'chứng từ'}) ---\n"
+          + msg + "\n----------------")
 
     # 2) mở Zalo (tự chờ trạng thái + tự mở khoá nếu cần) -> mở chat đúng người
     dlg = enter_zalo()
