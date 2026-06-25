@@ -64,7 +64,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("RPA hoá đơn")
-        root.geometry("560x520")
+        root.geometry("560x560")
         root.attributes("-topmost", True)
         pad = {"padx": 10, "pady": 6}
 
@@ -85,7 +85,20 @@ class App:
         ttk.Entry(f1, textvariable=self.doc_var).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(f1, text="Chọn…", command=self.pick_doc).pack(side="left")
 
-        # ── 2) Tab đích ─────────────────────────────────────────────────
+        # ── 2) OCR Provider ─────────────────────────────────────────────
+        f2 = ttk.Frame(root); f2.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(f2, text="OCR Provider:").pack(side="left")
+        self.provider_var = tk.StringVar(
+            value=os.environ.get("OCR_PROVIDER", "openai").lower())
+        _providers = ["openai", "gemini", "claude", "ollama", "mock"]
+        ttk.Combobox(f2, textvariable=self.provider_var, values=_providers,
+                     width=10, state="readonly").pack(side="left", padx=6)
+        self._provider_hint = ttk.Label(f2, text="", foreground="#555")
+        self._provider_hint.pack(side="left")
+        self.provider_var.trace_add("write", self._on_provider_change)
+        self._on_provider_change()   # hiện hint lần đầu
+
+        # ── 3) Tab đích ─────────────────────────────────────────────────
         self.nb = ttk.Notebook(root)
         self.nb.pack(fill="x", **pad)
 
@@ -116,7 +129,7 @@ class App:
         self.headed = tk.BooleanVar(value=True)  # luôn hiện trình duyệt Form
         self.watch  = tk.BooleanVar(value=True)  # luôn mở Excel/Access xem điền
 
-        # ── 3) Nút hành động ────────────────────────────────────────────
+        # ── 4) Nút hành động ────────────────────────────────────────────
         f4 = ttk.Frame(root); f4.pack(fill="x", **pad)
         self.btn_prev = ttk.Button(f4, text="Xem trước nội dung",
                                    command=lambda: self.run(False))
@@ -125,7 +138,7 @@ class App:
                                  command=lambda: self.run(True))
         self.btn_go.pack(side="left", expand=True, fill="x", padx=4)
 
-        # ── 4) Log ──────────────────────────────────────────────────────
+        # ── 5) Log ──────────────────────────────────────────────────────
         self.log = tk.Text(root, height=16, state="disabled", wrap="word",
                            font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, **pad)
@@ -157,6 +170,17 @@ class App:
             filetypes=[("Excel", "*.xlsx *.xlsm"), ("Tất cả", "*.*")])
         if p:
             self.excel_path.set(p)
+
+    def _on_provider_change(self, *_):
+        hints = {
+            "openai":  "GPT-4o-mini  (cần OPENAI_API_KEY)",
+            "gemini":  "gemini-2.5-pro  (cần GEMINI_API_KEY)",
+            "claude":  "Claude Haiku  (cần ANTHROPIC_API_KEY)",
+            "ollama":  "LLaVA local  (cần ollama serve)",
+            "mock":    "giả lập — không gọi API",
+        }
+        self._provider_hint.configure(
+            text=hints.get(self.provider_var.get(), ""))
 
     def _on_doc_edit(self, *_):
         if not self._set_display:
@@ -201,13 +225,15 @@ class App:
                        "access": self.use_access.get()},
                       submit, self.headed.get(), self.watch.get())
 
+        provider = self.provider_var.get()
         self.btn_prev.configure(state="disabled")
         self.btn_go.configure(state="disabled")
         self.log.configure(state="normal"); self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        threading.Thread(target=self._worker, args=(docs, params), daemon=True).start()
+        threading.Thread(target=self._worker, args=(docs, params, provider), daemon=True).start()
 
-    def _worker(self, docs, params):
+    def _worker(self, docs, params, provider):
+        os.environ["OCR_PROVIDER"] = provider   # áp dụng trước khi bất kỳ OCR call nào
         target, extra, submit, headed, watch = params
         old = sys.stdout
         sys.stdout = TkWriter(self.log)
