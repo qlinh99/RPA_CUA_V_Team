@@ -210,6 +210,56 @@ def _extract_md_headers(doc_text: str) -> "list[str]":
     return []
 
 
+# Regex patterns cho các trường hoá đơn VN phổ biến (label_keyword → patterns)
+# Dùng làm fallback khi LLM trả None nhưng text PDF có giá trị rõ ràng
+_INV_FIELD_REGEXES: "list[tuple[str, list[str]]]" = [
+    ("số hoá đơn", [
+        r"(?<!\w)Số\s*[:\-]\s*(\d{3,10})",          # Số: 00007781
+        r"(?<!\w)No\.?\s*[:\-]\s*(\d{3,10})",       # No: 00007781 / No.: ...
+        r"Số\s+hoá?\s*đơn\s*[:\-]?\s*(\d{3,10})",  # Số hoá đơn: 00007781
+    ]),
+    ("ký hiệu", [
+        r"Ký\s*hiệu\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/]{2,14})",  # Ký hiệu: 1C26TML
+        r"Series\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/]{2,14})",
+    ]),
+    ("mst", [
+        r"MST\s*[:\-]?\s*(\d{10,14})",
+        r"Mã\s+số\s+thuế\s*[:\-]?\s*(\d{10,14})",
+    ]),
+    ("ngày lập", [
+        r"[Nn]gày\s+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})",
+        r"[Nn]gày\s+lập\s*[:\-]?\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})",
+    ]),
+]
+
+
+def _regex_patch_invoice(raw: dict, doc_text: str, fields: "list[dict]") -> dict:
+    """Fallback: với trường nào LLM trả None, thử tìm bằng regex trong doc_text."""
+    patched = dict(raw)
+    for f in fields:
+        fid = _fid(f)
+        if patched.get(fid) not in (None, "", "null"):
+            continue
+        label_lower = f["label"].lower()
+        for kw, patterns in _INV_FIELD_REGEXES:
+            if kw not in label_lower:
+                continue
+            for pat in patterns:
+                m = re.search(pat, doc_text, re.IGNORECASE)
+                if not m:
+                    continue
+                # Nhóm 1 group → giá trị thẳng; 3 groups → ngày DD/MM/YYYY
+                if m.lastindex == 3:
+                    val = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+                else:
+                    val = re.sub(r"\s+", "", m.group(1))
+                patched[fid] = val
+                print(f"   🔍 Regex fallback: {f['label']} ← {val!r}")
+                break
+            break
+    return patched
+
+
 # ── prompt động: sinh từ chính các trường của form ────────────────────────────
 def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     lines = []
@@ -355,9 +405,11 @@ def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
     adapter = create_ocr_adapter()
     single_merged: dict = {}   # gộp các trang đơn-bản-ghi
     multi_records: list = []   # bảng ghi nhiều bản ghi phát hiện từ trang nào đó
+    text_pages: "list[str]" = []   # thu thập text cho regex fallback
 
     for idx, page in enumerate(pages, 1):
         if page[0] == "text":
+            text_pages.append(page[1])
             result = adapter.ocr([], prompt=build_prompt(fields, page[1]))
         else:
             _, b64, size = page
@@ -383,6 +435,11 @@ def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
             for k, v in data.items():
                 if v not in (None, "", "null") and single_merged.get(k) in (None, "", "null", None):
                     single_merged.setdefault(k, v)
+
+    # Regex fallback: điền các trường LLM bỏ sót từ text PDF trực tiếp
+    full_text = "\n".join(text_pages)
+    if full_text:
+        single_merged = _regex_patch_invoice(single_merged, full_text, fields)
 
     result = multi_records if multi_records else [single_merged]
     if multi_records and single_merged:
