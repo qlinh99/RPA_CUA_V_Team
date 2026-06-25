@@ -41,17 +41,29 @@ def read_value(ctrl) -> str:
 APP_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "hoadon_demo.accdb")
 WINDOW_TITLE = "Access"       # regex 1 phần tiêu đề cửa sổ đích
 
-# key | label (cho OCR) | name (UIA Name của ô) | type
+# key | label (cho OCR) | name (UIA Name của ô) | type | required | hint
+# hint: gợi ý thêm cho LLM để phân biệt các trường dễ nhầm trên hóa đơn
 FIELDS: list[dict] = [
-    {"key": "so_hoa_don",      "label": "Số hoá đơn",          "name": "txtSoHoaDon",      "type": "text"},
-    {"key": "ky_hieu",         "label": "Ký hiệu hoá đơn",     "name": "txtKyHieu",        "type": "text"},
-    {"key": "ngay_lap",        "label": "Ngày lập",            "name": "txtNgayLap",       "type": "date"},
-    {"key": "ten_ncc",         "label": "Tên nhà cung cấp",    "name": "txtTenNCC",        "type": "text"},
-    {"key": "mst_ncc",         "label": "MST nhà cung cấp",    "name": "txtMST",           "type": "text"},
-    {"key": "dien_giai",       "label": "Diễn giải",           "name": "txtDienGiai",      "type": "text"},
-    {"key": "tien_truoc_thue", "label": "Tiền trước thuế",     "name": "txtTienTruocThue", "type": "text"},
-    {"key": "thue_suat",       "label": "Thuế suất GTGT",      "name": "txtThueSuat",      "type": "text"},
-    {"key": "tong_thanh_toan", "label": "Tổng tiền thanh toán","name": "txtTongThanhToan", "type": "text"},
+    {"key": "so_hoa_don",      "label": "Số hoá đơn",
+     "name": "txtSoHoaDon",      "type": "text", "required": True,
+     "hint": "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123' — KHÁC với Ký hiệu"},
+    {"key": "ky_hieu",         "label": "Ký hiệu hoá đơn",
+     "name": "txtKyHieu",        "type": "text", "required": True,
+     "hint": "Mã định danh mẫu/ký hiệu hoá đơn, thường dạng chữ+số như '1C25T', 'K25TSN', '01GTKT0/001' — KHÁC với Số hoá đơn"},
+    {"key": "ngay_lap",        "label": "Ngày lập",
+     "name": "txtNgayLap",       "type": "date", "required": True,  "hint": ""},
+    {"key": "ten_ncc",         "label": "Tên nhà cung cấp",
+     "name": "txtTenNCC",        "type": "text", "required": True,  "hint": ""},
+    {"key": "mst_ncc",         "label": "MST nhà cung cấp",
+     "name": "txtMST",           "type": "text", "required": True,  "hint": ""},
+    {"key": "dien_giai",       "label": "Diễn giải",
+     "name": "txtDienGiai",      "type": "text", "required": False, "hint": ""},
+    {"key": "tien_truoc_thue", "label": "Tiền trước thuế",
+     "name": "txtTienTruocThue", "type": "text", "required": True,  "hint": ""},
+    {"key": "thue_suat",       "label": "Thuế suất GTGT",
+     "name": "txtThueSuat",      "type": "text", "required": False, "hint": ""},
+    {"key": "tong_thanh_toan", "label": "Tổng tiền thanh toán",
+     "name": "txtTongThanhToan", "type": "text", "required": True,  "hint": ""},
 ]
 # Access lưu record khi gõ Shift+Enter; form không có nút Lưu riêng.
 SUBMIT = {"keys": "+{ENTER}"}   # hoặc {"auto_id": "..."} / {"name": "..."} với app có nút Lưu
@@ -194,8 +206,10 @@ def fill_desktop(values_by_id: dict, *, submit: bool = False, profile: "dict | N
 
 
 def schema() -> list[dict]:
-    """Schema cho autofill: id=key (Access định danh bằng Name nên không dùng auto_id làm id)."""
-    return [{"id": f["key"], "label": f["label"], "type": f.get("type", "text")} for f in FIELDS]
+    """Schema cho autofill: id=key. Giữ required + hint để _normalize_record dùng."""
+    return [{"id": f["key"], "label": f["label"], "type": f.get("type", "text"),
+             "required": f.get("required", False), "hint": f.get("hint", "")}
+            for f in FIELDS]
 
 
 if __name__ == "__main__":

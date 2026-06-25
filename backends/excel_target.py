@@ -18,6 +18,19 @@ HEADERS_MAU = [
     "Tổng tiền thanh toán",
 ]
 
+# Trường hóa đơn BẮT BUỘC phải có giá trị (theo nhãn cột, chuẩn hoá thường)
+_REQUIRED_INVOICE_LABELS: "set[str]" = {
+    "số hoá đơn", "ký hiệu hoá đơn", "ngày lập", "ngày hoá đơn",
+    "tên nhà cung cấp", "mst nhà cung cấp", "mã số thuế nhà cung cấp",
+    "tiền trước thuế", "tổng tiền thanh toán", "tổng thanh toán",
+}
+
+# Hint phân biệt trường dễ nhầm (nhãn thường → hint)
+_FIELD_HINTS: "dict[str, str]" = {
+    "số hoá đơn":      "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123' — KHÁC với Ký hiệu",
+    "ký hiệu hoá đơn": "Mã định danh mẫu/ký hiệu, thường dạng chữ+số như '1C25T', 'K25TSN' — KHÁC với Số hoá đơn",
+}
+
 
 def _guess_type(label: str) -> str:
     l = (label or "").lower()
@@ -41,11 +54,14 @@ def inspect_excel(path: str, sheet: "str | None" = None, header_row: int = 1):
         label = "" if cell.value is None else str(cell.value).strip()
         if not label:
             continue
+        label_lower = label.lower().strip()
         fields.append({
-            "id": f"col{col}",        # khoá dùng cho prompt/kết quả OCR
+            "id": f"col{col}",
             "label": label,
             "type": _guess_type(label),
             "col": col,
+            "required": label_lower in _REQUIRED_INVOICE_LABELS,
+            "hint": _FIELD_HINTS.get(label_lower, ""),
         })
     name = ws.title
     wb.close()

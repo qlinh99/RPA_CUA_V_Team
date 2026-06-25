@@ -213,12 +213,20 @@ def _extract_md_headers(doc_text: str) -> "list[str]":
 # ── prompt động: sinh từ chính các trường của form ────────────────────────────
 def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     lines = []
+    is_invoice = False
     for f in fields:
         d = f'- id="{_fid(f)}" | nhãn="{f["label"]}" | kiểu={f["type"]}'
         if f["type"] == "date":
             d += " | ĐỊNH DẠNG NGÀY: DD/MM/YYYY"
+        if f.get("required"):
+            d += " | BẮT BUỘC (không được để null)"
         if f.get("options"):
             d += f' | CHỌN ĐÚNG 1 trong: {f["options"]}'
+        if f.get("hint"):
+            d += f' | GỢI Ý: {f["hint"]}'
+            is_invoice = True
+        elif any(k in f["label"].lower() for k in ("hoá đơn", "hoa don", "ký hiệu", "ky hieu")):
+            is_invoice = True
         lines.append(d)
     schema = "\n".join(lines)
     p = (
@@ -233,6 +241,13 @@ def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
         "hãy TỔNG HỢP từ BẢNG KÊ hàng hoá/dịch vụ — liệt kê tên các mặt hàng/dịch vụ, nối bằng '; '. "
         "Chỉ để null khi thật sự không có dòng hàng nào. KHÔNG bịa thông tin không có trong chứng từ.\n"
     )
+    if is_invoice:
+        p += (
+            "\nLƯU Ý QUAN TRỌNG — Hoá đơn Việt Nam có HAI trường KHÁC NHAU:\n"
+            "• 'Số hoá đơn' = con số tuần tự thuần chữ số, ví dụ '0000123', '00001' — thường ở góc trên phải.\n"
+            "• 'Ký hiệu hoá đơn' = mã mẫu/series, thường gồm chữ cái và số, ví dụ '1C25T', 'K25TSN', '01GTKT0/001'.\n"
+            "TUYỆT ĐỐI không hoán đổi hai trường này. Nếu chỉ tìm thấy một giá trị, hãy xác định đúng nó là Số hay Ký hiệu trước khi gán.\n"
+        )
     if doc_text is not None:
         p += f"\nNỘI DUNG VĂN BẢN CHỨNG TỪ:\n----------\n{doc_text}\n"
         # Phát hiện bảng markdown (CSV/Excel) — tên cột có thể là viết tắt snake_case
