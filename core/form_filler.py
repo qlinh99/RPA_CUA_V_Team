@@ -41,69 +41,137 @@ def _split_time(val: str) -> "tuple[str, str]":
 # ── Playwright ────────────────────────────────────────────────────────────────
 NEXT_LABELS = ("tiếp", "tiếp theo", "next")
 
+# ── JS helpers: giảm roundtrips ───────────────────────────────────────────────
+
+def _labels_on_page(page, items: "list[dict]") -> "set[str]":
+    """1 JS roundtrip → set nhãn đang hiển thị trên trang.
+    Thay thế N lần q.count() tuần tự."""
+    labels = [it["label"] for it in items if it.get("value") not in (None, "", [])]
+    if not labels:
+        return set()
+    found: list = page.evaluate(
+        """(labels) => {
+            const texts = [...document.querySelectorAll('div[role="listitem"]')]
+                          .map(el => el.textContent.normalize('NFC'));
+            return labels.filter(lbl =>
+                texts.some(t => t.includes(lbl.normalize('NFC'))));
+        }""",
+        labels,
+    )
+    return set(found)
+
+
+def _js_click_radio(page, label: str, val: str,
+                    grid_label: "str | None") -> bool:
+    """Click radio/scale bằng JS — 1 roundtrip thay vì 4–5 locator chains.
+    grid_label khác None → tìm radiogroup theo aria-label (grid row)."""
+    if grid_label:
+        js = """([label, val]) => {
+            const lbl = label.normalize('NFC');
+            const v   = val.normalize('NFC');
+            const rg  = [...document.querySelectorAll('[role="radiogroup"]')]
+                .find(el => (el.getAttribute('aria-label') || '').normalize('NFC') === lbl);
+            if (!rg) return false;
+            const r = [...rg.querySelectorAll('[role="radio"]')].find(r => {
+                const al = (r.getAttribute('aria-label') || '').normalize('NFC');
+                return al === v || al.startsWith(v + ',');
+            });
+            if (r) { r.click(); return true; }
+            return false;
+        }"""
+    else:
+        js = """([label, val]) => {
+            const lbl = label.normalize('NFC');
+            const v   = val.normalize('NFC');
+            const li  = [...document.querySelectorAll('div[role="listitem"]')]
+                .find(el => el.textContent.normalize('NFC').includes(lbl));
+            if (!li) return false;
+            const r = [...li.querySelectorAll('[role="radio"]')].find(r => {
+                const al = (r.getAttribute('aria-label') || '').normalize('NFC');
+                return al === v || r.textContent.normalize('NFC').trim() === v;
+            });
+            if (r) { r.click(); return true; }
+            return false;
+        }"""
+    return bool(page.evaluate(js, [label, val]))
+
+
+def _js_click_checkbox(page, label: str, vals: "list[str]") -> bool:
+    """Click checkbox(es) bằng JS — 1 roundtrip."""
+    js = """([label, vals]) => {
+        const lbl = label.normalize('NFC');
+        const li  = [...document.querySelectorAll('div[role="listitem"]')]
+            .find(el => el.textContent.normalize('NFC').includes(lbl));
+        if (!li) return false;
+        let ok = false;
+        for (const val of vals) {
+            const v  = val.normalize('NFC');
+            const cb = [...li.querySelectorAll('[role="checkbox"]')].find(el => {
+                const al = (el.getAttribute('aria-label') || '').normalize('NFC');
+                return al === v || el.textContent.normalize('NFC').trim() === v;
+            });
+            if (cb) { cb.click(); ok = true; }
+        }
+        return ok;
+    }"""
+    return bool(page.evaluate(js, [label, vals]))
+
 
 def _find_nav(page):
-    """Tìm nút điều hướng trên trang hiện tại: (nút Gửi, nút Tiếp). 'Quay lại' bị bỏ qua."""
-    submit_b = next_b = None
-    btns = page.get_by_role("button")
-    for i in range(btns.count()):
-        b = btns.nth(i)
-        l = (_nfc(b.get_attribute("aria-label") or "") or _nfc(b.inner_text() or "")).strip().lower()
-        if l in SUBMIT_LABELS:
-            submit_b = b
-        elif l in NEXT_LABELS:
-            next_b = b
-    return submit_b, next_b
+    """Tìm nút Gửi/Tiếp — 1 JS roundtrip, index đồng nhất với querySelectorAll."""
+    idx: list = page.evaluate(
+        """() => {
+            const SL = new Set(['gửi', 'submit']);
+            const NL = new Set(['tiếp', 'tiếp theo', 'next']);
+            const btns = [...document.querySelectorAll('[role="button"]')];
+            let si = -1, ni = -1;
+            btns.forEach((b, i) => {
+                const l = (b.getAttribute('aria-label') || b.textContent || '')
+                           .trim().normalize('NFC').toLowerCase();
+                if (SL.has(l)) si = i;
+                else if (NL.has(l)) ni = i;
+            });
+            return [si, ni];
+        }"""
+    )
+    # Dùng attribute selector để index khớp với querySelectorAll trong JS
+    btns = page.locator('[role="button"]')
+    si, ni = idx
+    return (btns.nth(si) if si >= 0 else None,
+            btns.nth(ni) if ni >= 0 else None)
 
 
 def _try_fill_field(page, item) -> bool:
-    """Điền 1 trường NẾU nó nằm trên trang hiện tại. Trả True nếu đã xử lý, False nếu không có ở đây."""
+    """Điền 1 trường — giả định trường đã được xác nhận có trên trang (từ _labels_on_page).
+    Radio/checkbox dùng JS (1 roundtrip); text/date/dropdown dùng Playwright fill."""
     val = item.get("value")
     if val in (None, "", []):
         return True
     label, t = item["label"], item["type"]
-    q = page.locator("div[role='listitem']").filter(has_text=label)   # ô câu hỏi theo nhãn
-    if q.count() == 0:
-        return False                                                  # không ở trang này
-    q = q.first
     try:
+        if t in ("radio", "scale"):
+            return _js_click_radio(
+                page, _nfc(label), _nfc(str(val)),
+                _nfc(item["grid_label"]) if item.get("grid_label") else None,
+            )
+        if t == "checkbox":
+            vals = val if isinstance(val, list) else [val]
+            return _js_click_checkbox(page, _nfc(label), [_nfc(v) for v in vals])
+
+        # text / date / dropdown — Playwright fill (đáng tin cậy với Angular/React)
+        q = page.locator("div[role='listitem']").filter(has_text=label).first
         if t in ("text", "paragraph"):
-            box = q.get_by_role("textbox").first
-            box.click(); box.fill(str(val))
+            q.get_by_role("textbox").first.fill(str(val), timeout=4000)
         elif t == "date":
-            q.locator('input[type="date"]').first.fill(_ddmmyyyy_to_iso(val))
-            # Câu hỏi 'ngày + giờ' có thêm ô Giờ/Phút — BẮT BUỘC điền, nếu trống
-            # Google báo "Thời gian không hợp lệ" và CHẶN nút Gửi.
+            q.locator('input[type="date"]').first.fill(_ddmmyyyy_to_iso(val), timeout=4000)
             hh, mm = _split_time(val)
             for lbl, v in (("Giờ", hh), ("Hour", hh), ("Phút", mm), ("Minute", mm)):
                 ti = q.locator(f'input[aria-label="{lbl}"]')
                 if ti.count():
                     ti.first.fill(v)
-        elif t in ("radio", "scale"):
-            if item.get("grid_label"):
-                # Anchor vào listitem cha (grid_label) trước — ổn định hơn dùng label dòng
-                outer = page.locator("div[role='listitem']").filter(
-                    has_text=_nfc(item["grid_label"])).first
-                # Chiến lược 1: radiogroup[aria-label="<nhãn dòng>"]
-                rg = outer.locator(f'[role="radiogroup"][aria-label="{_nfc(label)}"]')
-                # Chiến lược 2: radiogroup chứa text nhãn dòng
-                if rg.count() == 0:
-                    rg = outer.locator("[role='radiogroup']").filter(has_text=_nfc(label))
-                ctx = rg.first if rg.count() else outer
-            else:
-                ctx = q
-            val_nfc = _nfc(str(val))
-            try:
-                ctx.get_by_role("radio", name=val_nfc, exact=True).first.click()
-            except Exception:
-                # aria-label Google Forms đôi khi thêm ngữ cảnh hàng: "Đúng, Hàng 1"
-                ctx.get_by_role("radio", name=val_nfc, exact=False).first.click()
         elif t == "dropdown":
             q.get_by_role("listbox").first.click()
             page.get_by_role("option", name=str(val), exact=True).first.click()
-        elif t == "checkbox":
-            for v in (val if isinstance(val, list) else [val]):
-                q.get_by_role("checkbox", name=str(v), exact=True).click()
         else:
             return True
         return True
@@ -145,10 +213,12 @@ def _confirm_submitted(page) -> "tuple[bool, str]":
 def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: bool = True,
                             retries: int = 2, shot_dir: Path = SHOT_DIR,
                             channel: str = "chrome", slow_mo: int = 0,
-                            shot_name: str = "form", browser=None) -> dict:
+                            shot_name: str = "form", browser=None,
+                            debug: bool = False) -> dict:
     """
     browser=None : tạo + đóng browser mới mỗi lần gọi (1 bản ghi độc lập).
     browser=<Browser> : tái sử dụng browser đã mở, chỉ mở tab mới (multi-record).
+    debug=True : in chi tiết từng trường thất bại trên mỗi trang.
     """
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -163,24 +233,30 @@ def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: boo
 
             remaining = [it for it in items if it.get("value") not in (None, "", [])]
             for pg in range(1, 21):
+                # 1 JS roundtrip → biết label nào đang hiển thị trang này
+                on_page = _labels_on_page(page, remaining)
+
                 prev_len = len(remaining)
-                remaining = [it for it in remaining if not _try_fill_field(page, it)]
+                new_remaining = []
+                for it in remaining:
+                    if it["label"] not in on_page:
+                        new_remaining.append(it)          # chưa đến trang này
+                    elif not _try_fill_field(page, it):
+                        new_remaining.append(it)          # trên trang nhưng thất bại
+                remaining = new_remaining
                 filled_now = prev_len - len(remaining)
+
                 submit_b, next_b = _find_nav(page)
 
-                # Trường nào có giá trị, locator thấy trên trang này, nhưng vẫn chưa điền
-                on_page_fail = [
-                    it for it in remaining
-                    if it.get("value") not in (None, "", [])
-                    and page.locator("div[role='listitem']").filter(
-                        has_text=_nfc(it["label"])).count() > 0
-                ]
+                # Trường nào ở trang này nhưng vẫn còn trong remaining → thất bại
+                on_page_fail = [it for it in remaining if it["label"] in on_page
+                                and it.get("value") not in (None, "", [])]
                 pg_label = "Trước khi nộp" if submit_b else f"Trang {pg}"
                 if on_page_fail:
-                    print(f"   ⚠️  {pg_label}: {len(on_page_fail)} trường"
-                          f" thấy trên trang nhưng CHƯA ĐIỀN ĐƯỢC:")
-                    for it in on_page_fail:
-                        print(f"      • {it['label']!r}  ← {it['value']!r}")
+                    print(f"   ⚠️  {pg_label}: {len(on_page_fail)} trường CHƯA ĐIỀN ĐƯỢC")
+                    if debug:
+                        for it in on_page_fail:
+                            print(f"      • {it['label']!r}  ← {it['value']!r}")
                 elif filled_now:
                     print(f"   ✅  {pg_label}: điền {filled_now} trường")
 

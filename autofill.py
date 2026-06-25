@@ -318,13 +318,18 @@ def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
     shot = re.sub(r"[^0-9A-Za-z_-]", "_", str(items[0].get("value") or "form"))[:40]
     res = form_filler.fill_and_submit_browser(
         schema["view_url"], items, headless=not args.headed,
-        slow_mo=700 if args.headed else 0, shot_name=shot,
+        slow_mo=200 if args.headed else 0, shot_name=shot,
         browser=browser,
     )
     if not res["ok"]:
-        print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK CUA Gemini...")
-        from backends import cua_fallback
-        res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
+        if browser is not None:
+            # shared browser đang chạy sync_playwright() — không thể lồng thêm
+            print(f"\n⚠️  Playwright thất bại ({res['error'][:60]})")
+            print("   ℹ️  Bỏ qua CUA fallback khi dùng shared browser (tái sử dụng trình duyệt)")
+        else:
+            print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK CUA Gemini...")
+            from backends import cua_fallback
+            res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
     print(res)
     return 0 if res["ok"] else 1
 
@@ -366,7 +371,7 @@ def run_form(args) -> int:
         print(f"\n♻️  Tái sử dụng browser cho {n} bản ghi")
         with form_filler.browser_context(
             headless=not args.headed,
-            slow_mo=700 if args.headed else 0,
+            slow_mo=200 if args.headed else 0,
         ) as shared_browser:
             _run_records(shared_browser)
     else:
