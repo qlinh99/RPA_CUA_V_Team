@@ -6,23 +6,42 @@ Chọn file chứng từ → chọn tab đích → Xem trước / Điền & Nộ
 Chạy:  py -3.11 app_gui.py
 """
 import _bootstrap  # .env, temp->D:, sys.path
+import json
 import os
 import queue as _queue
 import sys
 import threading
 import types
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from pathlib import Path
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 import autofill
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRESET_FILE = Path(HERE) / "data" / "presets.json"
 
 
-def build_args(target, doc, extra, submit, headed, watch=True) -> types.SimpleNamespace:
+def _load_presets() -> dict:
+    try:
+        if PRESET_FILE.exists():
+            return json.loads(PRESET_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_presets(presets: dict) -> None:
+    PRESET_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PRESET_FILE.write_text(
+        json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_args(target, doc, extra, submit, headed, watch=True,
+               cua_mode: str = "auto") -> types.SimpleNamespace:
     a = types.SimpleNamespace(
         doc=doc, submit=submit, headed=headed,
-        form=None, refresh=False, cua=False,
+        form=None, refresh=False, cua=(cua_mode == "cua_only"),
         excel=None, sheet=None, header_row=1, watch=watch,
         access=False,
     )
@@ -189,7 +208,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("RPA hoá đơn")
-        root.geometry("560x520")
+        root.geometry("580x620")
         root.attributes("-topmost", True)
         pad = {"padx": 10, "pady": 6}
 
@@ -199,6 +218,20 @@ class App:
         style.map("TNotebook.Tab",
                   background=[("selected", "#1a6fc4")],
                   foreground=[("selected", "white")])
+
+        # ── 0) Preset ───────────────────────────────────────────────────
+        self._presets = _load_presets()
+        f0 = ttk.Frame(root); f0.pack(fill="x", **pad)
+        ttk.Label(f0, text="Preset:").pack(side="left")
+        self.preset_var = tk.StringVar()
+        self.preset_cb = ttk.Combobox(
+            f0, textvariable=self.preset_var,
+            values=list(self._presets.keys()),
+            state="readonly", width=30)
+        self.preset_cb.pack(side="left", padx=6)
+        self.preset_cb.bind("<<ComboboxSelected>>", self._on_preset_select)
+        ttk.Button(f0, text="Lưu preset", command=self._save_preset).pack(side="left", padx=(0, 4))
+        ttk.Button(f0, text="Xoá", command=self._delete_preset).pack(side="left")
 
         # ── 1) Chọn chứng từ ────────────────────────────────────────────
         self.docs = []
@@ -220,6 +253,18 @@ class App:
         ttk.Label(t0, text="Form URL (bỏ trống = dùng form cũ):").pack(anchor="w")
         self.form_url = tk.StringVar()
         ttk.Entry(t0, textvariable=self.form_url).pack(fill="x", pady=(3, 0))
+
+        ttk.Separator(t0, orient="horizontal").pack(fill="x", pady=(10, 6))
+        ttk.Label(t0, text="Chế độ điền:").pack(anchor="w")
+        self.cua_mode = tk.StringVar(value="auto")
+        ttk.Radiobutton(
+            t0, text="Playwright + CUA dự phòng  (mặc định)",
+            variable=self.cua_mode, value="auto",
+        ).pack(anchor="w", padx=10, pady=(2, 0))
+        ttk.Radiobutton(
+            t0, text="Chỉ CUA Gemini  (bỏ qua Playwright hoàn toàn)",
+            variable=self.cua_mode, value="cua_only",
+        ).pack(anchor="w", padx=10, pady=(2, 0))
 
         # Tab 1 — Hóa đơn (Excel & Access)
         t1 = ttk.Frame(self.nb, padding=(8, 8, 8, 10))
@@ -319,12 +364,14 @@ class App:
         if tab == 0:
             params = ("form",
                       self.form_url.get().strip(),
-                      submit, self.headed.get(), self.watch.get())
+                      submit, self.headed.get(), self.watch.get(),
+                      self.cua_mode.get())
         else:
             params = ("invoice",
                       {"excel":  (self.use_excel.get(),  self.excel_path.get().strip()),
                        "access": self.use_access.get()},
-                      submit, self.headed.get(), self.watch.get())
+                      submit, self.headed.get(), self.watch.get(),
+                      "auto")
 
         self.btn_prev.configure(state="disabled")
         self.btn_go.configure(state="disabled")
@@ -333,7 +380,7 @@ class App:
         threading.Thread(target=self._worker, args=(docs, params), daemon=True).start()
 
     def _worker(self, docs, params):
-        target, extra, submit, headed, watch = params
+        target, extra, submit, headed, watch, cua_mode = params
         old = sys.stdout
         sys.stdout = TkWriter(self.log)
         codes = []
@@ -366,7 +413,8 @@ class App:
                         print("\n⛔ LỖI:", e, "\n", traceback.format_exc())
                         rc = 1
                 else:
-                    a = build_args(target, doc, extra, submit, headed, watch)
+                    a = build_args(target, doc, extra, submit, headed, watch,
+                                   cua_mode=cua_mode)
                     a.review_fn = review_fn
                     try:
                         rc = dispatch(a)
@@ -388,6 +436,60 @@ class App:
     def _done(self):
         self.btn_prev.configure(state="normal")
         self.btn_go.configure(state="normal")
+
+    # ── Preset ──────────────────────────────────────────────────────────
+    def _on_preset_select(self, _event=None):
+        name = self.preset_var.get()
+        p = self._presets.get(name)
+        if not p:
+            return
+        target = p.get("target", "form")
+        if target == "form":
+            self.nb.select(0)
+            self.form_url.set(p.get("form_url", ""))
+            self.cua_mode.set(p.get("cua_mode", "auto"))
+        else:
+            self.nb.select(1)
+            self.excel_path.set(p.get("excel", os.path.join(HERE, "data", "bao_cao.xlsx")))
+            self.use_excel.set(p.get("use_excel", True))
+            self.use_access.set(p.get("use_access", True))
+
+    def _save_preset(self):
+        name = simpledialog.askstring("Lưu preset", "Tên preset:", parent=self.root)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        tab = self.nb.index("current")
+        if tab == 0:
+            p = {
+                "target": "form",
+                "form_url": self.form_url.get().strip(),
+                "cua_mode": self.cua_mode.get(),
+            }
+        else:
+            p = {
+                "target": "invoice",
+                "excel": self.excel_path.get().strip(),
+                "use_excel": self.use_excel.get(),
+                "use_access": self.use_access.get(),
+            }
+        self._presets[name] = p
+        _save_presets(self._presets)
+        self.preset_cb.configure(values=list(self._presets.keys()))
+        self.preset_var.set(name)
+        messagebox.showinfo("Đã lưu", f"Preset '{name}' đã lưu vào\n{PRESET_FILE}")
+
+    def _delete_preset(self):
+        name = self.preset_var.get()
+        if not name:
+            messagebox.showwarning("Chưa chọn", "Hãy chọn preset cần xoá.")
+            return
+        if not messagebox.askyesno("Xoá preset", f"Xoá preset '{name}'?", parent=self.root):
+            return
+        self._presets.pop(name, None)
+        _save_presets(self._presets)
+        self.preset_cb.configure(values=list(self._presets.keys()))
+        self.preset_var.set("")
 
     def _make_review_fn(self, doc_name: str):
         """Trả về callback truyền vào args.review_fn.
