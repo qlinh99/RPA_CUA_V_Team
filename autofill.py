@@ -126,6 +126,90 @@ def resolve_schema(arg_form: "str | None", refresh: bool = False) -> dict:
     return schema
 
 
+# ── Slug helpers (dùng cho prompt + fallback lookup) ──────────────────────────
+def _to_ascii_slug(s: str) -> str:
+    """Nhãn/key bất kỳ → ascii slug để so sánh mờ (bỏ dấu tiếng Việt, ký tự đặc biệt)."""
+    s = unicodedata.normalize("NFD", str(s))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = s.replace("đ", "d").replace("Đ", "D").lower()
+    return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+
+
+_SLUG_STOPWORDS = {"va", "cua", "la", "de", "cac", "voi", "tren",
+                   "theo", "hoac", "mot", "cung", "trong"}
+
+
+def _slug_score(key: str, label: str) -> float:
+    """Điểm tương đồng [0,1] giữa key CSV slug và nhãn form slug.
+
+    Quy tắc (ưu tiên từ trên xuống):
+    1. target slug khớp CHÍNH XÁC với một phần của key (vd: "bhyt" ∈ parts "so_the_bhyt") → 0.8
+    2. Mọi phần 'distinctive' (len≥5) của key phải có trong nhãn → nếu không → 0
+       (dùng len≥5 thay vì ≥4 để bỏ qua viết tắt 4 chữ như csvc, bhyt)
+    3. Score = tỷ lệ phần key khớp nhãn (bỏ stopwords)
+    """
+    target_slug = _to_ascii_slug(label)
+    k_parts_all = set(_to_ascii_slug(key).split("_"))
+
+    # Quy tắc 1: target slug là ĐÚNG MỘT PHẦN của key (ví dụ: bhyt ∈ {so, the, bhyt})
+    if target_slug in k_parts_all and len(target_slug) >= 3:
+        return 0.8
+
+    k_parts = [p for p in k_parts_all if p and p not in _SLUG_STOPWORDS]
+    t_parts = set(target_slug.split("_")) - _SLUG_STOPWORDS
+    if not k_parts or not t_parts:
+        return 0.0
+
+    # Quy tắc 2: từ đặc trưng len≥5 phải khớp (len≥5 bỏ qua viết tắt 4 chữ như csvc, bhxh)
+    distinctive = [p for p in k_parts if len(p) >= 5]
+    if distinctive and not all(p in t_parts for p in distinctive):
+        return 0.0
+
+    matching = sum(1 for p in k_parts if p in t_parts)
+    return matching / len(k_parts)
+
+
+def _raw_lookup(raw: dict, f: dict):
+    """Lấy giá trị từ raw theo thứ tự ưu tiên:
+    1. entry ID / id chính xác
+    2. Nhãn field (LLM dùng label làm key)
+    3. Slug khớp chính xác
+    4. Slug khớp mờ (score ≥ 0.5) — bắt trường hợp LLM dùng key CSV ngắn gọn
+    """
+    # 1. Chính xác theo id/entry
+    v = raw.get(_fid(f))
+    if v not in (None, "", "null"):
+        return v
+    # 2. Theo nhãn nguyên bản
+    v = raw.get(f["label"])
+    if v not in (None, "", "null"):
+        return v
+    # 3 & 4. Slug match
+    target_slug = _to_ascii_slug(f["label"])
+    best_score, best_val = 0.0, None
+    for k, kv in raw.items():
+        if kv in (None, "", "null"):
+            continue
+        k_slug = _to_ascii_slug(str(k))
+        if k_slug == target_slug:           # khớp chính xác → dùng ngay
+            return kv
+        sc = _slug_score(str(k), f["label"])
+        if sc > best_score:
+            best_score, best_val = sc, kv
+    if best_score >= 0.5:
+        return best_val
+    return None
+
+
+def _extract_md_headers(doc_text: str) -> "list[str]":
+    """Bóc tên cột từ dòng đầu bảng markdown: '| col1 | col2 | ...'"""
+    for line in doc_text.strip().splitlines():
+        line = line.strip()
+        if line.startswith("|") and "---" not in line:
+            return [c.strip() for c in line.strip("|").split("|") if c.strip()]
+    return []
+
+
 # ── prompt động: sinh từ chính các trường của form ────────────────────────────
 def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     lines = []
@@ -151,6 +235,20 @@ def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     )
     if doc_text is not None:
         p += f"\nNỘI DUNG VĂN BẢN CHỨNG TỪ:\n----------\n{doc_text}\n"
+        # Phát hiện bảng markdown (CSV/Excel) — tên cột có thể là viết tắt snake_case
+        md_headers = _extract_md_headers(doc_text)
+        if md_headers:
+            # Xây bảng ánh xạ: cột CSV → id trường form (để LLM dùng đúng key)
+            mappings = []
+            for h in md_headers:
+                best_f = max(fields, key=lambda f: _slug_score(h, f["label"]), default=None)
+                if best_f and _slug_score(h, best_f["label"]) >= 0.4:
+                    mappings.append(f'  "{h}" → id="{_fid(best_f)}" ({best_f["label"]})')
+            if mappings:
+                p += ("\nLƯU Ý — Tài liệu là bảng có cấu trúc, tên cột viết tắt tiếng Việt.\n"
+                      "Ánh xạ suy luận (cột → id trường):\n"
+                      + "\n".join(mappings)
+                      + "\nDùng ĐÚNG id trường (entry.XXXXX) làm key JSON, KHÔNG dùng tên cột.\n")
     p += (
         "\nNếu chứng từ chứa NHIỀU bản ghi (bảng danh sách, nhiều phiếu, nhiều dòng dữ liệu), "
         "trả về JSON array [{...}, {...}]; nếu chỉ 1 bản ghi, trả về JSON object {...}.\n"
@@ -276,10 +374,11 @@ def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
 
 
 def _normalize_record(raw: dict, fields: "list[dict]") -> "tuple[list, list]":
-    """Chuẩn hoá 1 bản ghi raw → (items, issues)."""
+    """Chuẩn hoá 1 bản ghi raw → (items, issues).
+    Dùng _raw_lookup thay raw.get() để xử lý LLM trả key CSV/nhãn thay vì entry ID."""
     items, issues, optional_empty = [], [], []
     for f in fields:
-        val, err = normalize_value(raw.get(_fid(f)), f)
+        val, err = normalize_value(_raw_lookup(raw, f), f)
         items.append({**f, "value": val})
         if val in (None, "", []):
             if f.get("required"):
