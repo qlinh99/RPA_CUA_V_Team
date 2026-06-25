@@ -569,9 +569,16 @@ def run_form(args) -> int:
             if n > 1:
                 print(f"\n  ══ Bản ghi {i}/{n} ══")
             if issues:
-                print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
-                codes.append(2)
-                continue
+                review_fn = getattr(args, "review_fn", None)
+                if review_fn:
+                    result = review_fn(items, issues)
+                    if result is None:
+                        print(f"⏭️  Bản ghi {i}: bỏ qua theo yêu cầu người dùng.")
+                        codes.append(2); continue
+                    items = result
+                else:
+                    print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+                    codes.append(2); continue
             codes.append(_submit_form_record(schema, items, args, browser=shared_browser))
 
     if n > 1 and not args.cua:
@@ -604,8 +611,16 @@ def run_access(args) -> int:
         if len(all_records) > 1:
             print(f"\n  ══ Bản ghi {i}/{len(all_records)} ══")
         if issues:
-            print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
-            codes.append(2); continue
+            review_fn = getattr(args, "review_fn", None)
+            if review_fn:
+                result = review_fn(items, issues)
+                if result is None:
+                    print(f"⏭️  Bản ghi {i}: bỏ qua theo yêu cầu người dùng.")
+                    codes.append(2); continue
+                items = result
+            else:
+                print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+                codes.append(2); continue
         values = {it["id"]: it["value"] for it in items}
         out = access_filler.fill_access(values, submit=True)
         ok_ac = bool(out)
@@ -657,12 +672,20 @@ def run_invoice(args) -> int:
 
         # [X1] Không bỏ qua issues như trước (_issues) — chặn nếu có lỗi bắt buộc
         if issues:
-            print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
-            for iss in issues:
-                print(f"   - {iss}")
-            _audit_log("invoice", args.doc, False, f"bản ghi {i}: {issues[0]}")
-            codes.append(2)
-            continue
+            review_fn = getattr(args, "review_fn", None)
+            if review_fn:
+                result = review_fn(merged_items, issues)
+                if result is None:
+                    print(f"⏭️  Bản ghi {i}: bỏ qua theo yêu cầu người dùng.")
+                    _audit_log("invoice", args.doc, False, f"bản ghi {i}: bỏ qua")
+                    codes.append(2); continue
+                merged_items = result
+            else:
+                print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+                for iss in issues:
+                    print(f"   - {iss}")
+                _audit_log("invoice", args.doc, False, f"bản ghi {i}: {issues[0]}")
+                codes.append(2); continue
 
         if excel_fields:
             xl_values = {it["id"]: it["value"]
@@ -702,9 +725,20 @@ def run_excel(args) -> int:
         print(f"\n💡 Chưa ghi ({len(all_records)} bản ghi). Thêm --submit để thêm dòng vào báo cáo.")
         return 0
     rows_added = []
-    for i, (items, _issues) in enumerate(all_records, 1):
+    for i, (items, issues) in enumerate(all_records, 1):
         if len(all_records) > 1:
             print(f"\n  ══ Bản ghi {i}/{len(all_records)} ══")
+        if issues:
+            review_fn = getattr(args, "review_fn", None)
+            if review_fn:
+                result = review_fn(items, issues)
+                if result is None:
+                    print(f"⏭️  Bản ghi {i}: bỏ qua theo yêu cầu người dùng.")
+                    rows_added.append(None); continue
+                items = result
+            else:
+                print(f"⛔ Bản ghi {i}: có trường lỗi — bỏ qua.")
+                rows_added.append(None); continue
         values = {it["id"]: it["value"] for it in items}
         if args.watch:
             print("\n👁️  Mở Excel để xem điền trực tiếp (win32com)...")

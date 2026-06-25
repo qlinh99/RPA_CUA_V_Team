@@ -7,6 +7,7 @@ Chạy:  py -3.11 app_gui.py
 """
 import _bootstrap  # .env, temp->D:, sys.path
 import os
+import queue as _queue
 import sys
 import threading
 import types
@@ -60,6 +61,128 @@ class TkWriter:
 
     def flush(self):
         pass
+
+
+class ReviewDialog:
+    """Bảng tham chiếu thủ công — hiện khi OCR thiếu trường bắt buộc.
+
+    Worker thread block tại review_fn(); main thread hiện dialog này;
+    sau khi user xác nhận / bỏ qua, done_event được set để unblock worker.
+    """
+
+    def __init__(self, master, doc_name: str, items: list, issues: list,
+                 result_queue: "_queue.Queue", done_event: "threading.Event"):
+        self._rq = result_queue
+        self._ev = done_event
+        self._items = items
+        self._vars: "dict[str, tk.StringVar]" = {}
+
+        top = tk.Toplevel(master)
+        self._top = top
+        top.title(f"Xem xét thủ công — {doc_name}")
+        top.geometry("700x480")
+        top.grab_set()          # modal: khoá cửa sổ chính khi dialog mở
+        top.resizable(True, True)
+
+        # Nhãn lỗi từ issues (so sánh với item label)
+        issue_labels: "set[str]" = {iss.split(":")[0].strip() for iss in issues}
+
+        # ── Tiêu đề ──────────────────────────────────────────────────
+        ttk.Label(top,
+                  text=f"⚠️  {len(issues)} trường cần bổ sung — điền vào ô trống rồi bấm Xác nhận",
+                  foreground="#c0392b",
+                  font=("Segoe UI", 10, "bold")).pack(padx=14, pady=(10, 2), anchor="w")
+        ttk.Label(top,
+                  text="Trường có * là bắt buộc  •  ⛔ = lỗi cần sửa  •  ✓ = trích xuất OK",
+                  foreground="#555").pack(padx=14, pady=(0, 6), anchor="w")
+
+        # ── Bảng cuộn ─────────────────────────────────────────────────
+        outer = ttk.Frame(top)
+        outer.pack(fill="both", expand=True, padx=14, pady=0)
+
+        canvas = tk.Canvas(outer, highlightthickness=0, background="#fafafa")
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = ttk.Frame(canvas)
+        _win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(_win, width=e.width))
+        inner.bind("<Configure>",  lambda e: canvas.configure(
+            scrollregion=canvas.bbox("all")))
+        _mw_id = canvas.bind_all("<MouseWheel>",
+                                  lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+
+        # ── Header hàng ──────────────────────────────────────────────
+        _HDR = [("Trường", 24), ("Giá trị trích xuất", 0), ("", 4)]
+        for c, (txt, w) in enumerate(_HDR):
+            kw = {"width": w} if w else {}
+            ttk.Label(inner, text=txt, font=("Segoe UI", 9, "bold"),
+                      background="#dde3f0", anchor="w",
+                      **kw).grid(row=0, column=c, padx=2, pady=2, sticky="ew")
+
+        first_empty_entry = None
+        for r, item in enumerate(items, 1):
+            lbl   = item["label"]
+            req   = item.get("required", False)
+            err   = lbl in issue_labels
+            color = "#c0392b" if err else "#1a1a1a"
+
+            # Cột 0 — nhãn trường
+            ttk.Label(inner, text=lbl + (" *" if req else ""),
+                      foreground=color, anchor="w",
+                      width=24).grid(row=r, column=0, padx=(4, 2), pady=2, sticky="w")
+
+            # Cột 1 — Entry (lỗi) hoặc Label (OK)
+            var = tk.StringVar(value="" if item["value"] is None else str(item["value"]))
+            self._vars[item["id"]] = var
+            if err:
+                ent = ttk.Entry(inner, textvariable=var)
+                ent.grid(row=r, column=1, padx=2, pady=2, sticky="ew")
+                if first_empty_entry is None and not var.get():
+                    first_empty_entry = ent
+            else:
+                ttk.Label(inner, textvariable=var,
+                          background="#f4f4f4", anchor="w",
+                          relief="flat").grid(row=r, column=1, padx=2, pady=2, sticky="ew")
+
+            # Cột 2 — trạng thái
+            st, fg = ("⛔", "#c0392b") if err else ("✓", "#27ae60")
+            ttk.Label(inner, text=st, foreground=fg,
+                      anchor="center").grid(row=r, column=2, padx=4, pady=2)
+
+        inner.columnconfigure(1, weight=1)
+
+        # Focus ô lỗi đầu tiên còn trống
+        if first_empty_entry:
+            top.after(150, first_empty_entry.focus_set)
+
+        # ── Nút ──────────────────────────────────────────────────────
+        bf = ttk.Frame(top)
+        bf.pack(fill="x", padx=14, pady=10)
+        ttk.Button(bf, text="Xác nhận & Tiếp tục",
+                   command=self._confirm).pack(side="left", expand=True, fill="x", padx=(0, 6))
+        ttk.Button(bf, text="Bỏ qua bản ghi này",
+                   command=self._skip).pack(side="left", expand=True, fill="x")
+
+        top.protocol("WM_DELETE_WINDOW", self._skip)
+        top.bind("<Destroy>", lambda _: canvas.unbind_all("<MouseWheel>"))
+
+    def _confirm(self):
+        new_items = []
+        for item in self._items:
+            raw = self._vars[item["id"]].get().strip()
+            new_items.append({**item, "value": raw if raw else None})
+        self._rq.put(new_items)
+        self._top.destroy()
+        self._ev.set()
+
+    def _skip(self):
+        self._rq.put(None)
+        self._top.destroy()
+        self._ev.set()
 
 
 class App:
@@ -218,21 +341,23 @@ class App:
             for i, doc in enumerate(docs, 1):
                 print(f"\n{'='*48}\n[{i}/{len(docs)}] {os.path.basename(doc)}\n{'='*48}")
 
+                review_fn = self._make_review_fn(os.path.basename(doc))
                 if target == "invoice":
                     use_xl, xl_path = extra["excel"]
                     use_ac = extra["access"]
                     try:
                         if use_xl and use_ac:
-                            # Cả hai đích → build_args excel rồi bật thêm access
-                            # dispatch() sẽ thấy excel+access và gọi run_invoice (OCR 1 lần)
                             a = build_args("excel", doc, xl_path, submit, headed, watch)
                             a.access = True
+                            a.review_fn = review_fn
                             rc = dispatch(a)
                         elif use_xl:
                             a = build_args("excel", doc, xl_path, submit, headed, watch)
+                            a.review_fn = review_fn
                             rc = dispatch(a)
                         elif use_ac:
                             a = build_args("access", doc, "", submit, headed, watch)
+                            a.review_fn = review_fn
                             rc = dispatch(a)
                         else:
                             rc = 0
@@ -242,6 +367,7 @@ class App:
                         rc = 1
                 else:
                     a = build_args(target, doc, extra, submit, headed, watch)
+                    a.review_fn = review_fn
                     try:
                         rc = dispatch(a)
                     except Exception as e:
@@ -262,6 +388,24 @@ class App:
     def _done(self):
         self.btn_prev.configure(state="normal")
         self.btn_go.configure(state="normal")
+
+    def _make_review_fn(self, doc_name: str):
+        """Trả về callback truyền vào args.review_fn.
+
+        Được gọi từ worker thread khi có issues → block worker, hiện
+        ReviewDialog trên main thread, rồi trả lại items đã sửa (hoặc None).
+        """
+        q  = _queue.Queue()
+        ev = threading.Event()
+
+        def _callback(items, issues):
+            self.root.after(0, lambda: ReviewDialog(
+                self.root, doc_name, items, issues, q, ev))
+            ev.wait()   # block worker thread cho đến khi user xác nhận/bỏ qua
+            ev.clear()
+            return q.get()  # None = bỏ qua; list = items đã chỉnh
+
+        return _callback
 
 
 if __name__ == "__main__":
