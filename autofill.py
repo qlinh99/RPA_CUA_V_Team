@@ -435,6 +435,34 @@ def _cache_key(doc_path: str, fields: "list[dict]") -> tuple:
     return (doc_path, mtime, fields_sig)
 
 
+def _extract_json_direct(doc_path: str) -> "list[dict] | None":
+    """Parse file JSON trực tiếp — không dùng LLM.
+    Trả list[dict] với key gốc từ JSON; _raw_lookup sau đó ánh xạ sang field id.
+    Trả None nếu JSON không hợp lệ (caller fallback về đường LLM bình thường).
+    """
+    try:
+        txt = Path(doc_path).read_text(encoding="utf-8", errors="replace")
+        data = json.loads(txt)
+    except Exception as e:
+        print(f"  ⚠️  JSON không parse được ({e}) — gửi LLM thay.")
+        return None
+    records = data if isinstance(data, list) else [data]
+    records = [r for r in records if isinstance(r, dict)]
+    if not records:
+        print("  ⚠️  JSON không có dict nào — gửi LLM thay.")
+        return None
+    # Chuẩn hoá: bỏ key có giá trị rỗng/null; bỏ nested object/array
+    clean = []
+    for rec in records:
+        clean.append({
+            k: (None if str(v).strip() in ("null", "None", "N/A", "") else v)
+            for k, v in rec.items()
+            if not isinstance(v, (dict, list))
+        })
+    print(f"  📋 JSON trực tiếp: {len(clean)} bản ghi (bỏ qua LLM)")
+    return clean
+
+
 def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
     """OCR doc → danh sách bản ghi (thường 1; bảng/danh sách cho N).
     Kết quả được cache trong phiên — lần 2 (submit) dùng lại lần 1 (preview).
@@ -443,6 +471,13 @@ def extract_values(doc_path: str, fields: "list[dict]") -> "list[dict]":
     if key in _ocr_cache:
         print("  ⚡ Dùng kết quả OCR đã cache (bỏ qua OCR lần 2)")
         return _ocr_cache[key]
+
+    # JSON: parse trực tiếp thay vì gửi LLM — _raw_lookup xử lý slug matching
+    if Path(doc_path).suffix.lower() == ".json":
+        parsed = _extract_json_direct(doc_path)
+        if parsed is not None:
+            _ocr_cache[key] = parsed
+            return parsed
 
     pages = file_to_pages(doc_path)
     adapter = create_ocr_adapter()
