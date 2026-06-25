@@ -46,7 +46,7 @@ WINDOW_TITLE = "Access"       # regex 1 phần tiêu đề cửa sổ đích
 FIELDS: list[dict] = [
     {"key": "so_hoa_don",      "label": "Số hoá đơn",
      "name": "txtSoHoaDon",      "type": "text", "required": True,
-     "hint": "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123' — KHÁC với Ký hiệu"},
+     "hint": "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123', '00007781'. Trên hoá đơn thường in là 'Số:' hoặc 'No.' — KHÁC với Ký hiệu"},
     {"key": "ky_hieu",         "label": "Ký hiệu hoá đơn",
      "name": "txtKyHieu",        "type": "text", "required": True,
      "hint": "Mã định danh mẫu/ký hiệu hoá đơn, thường dạng chữ+số như '1C25T', 'K25TSN', '01GTKT0/001' — KHÁC với Số hoá đơn"},

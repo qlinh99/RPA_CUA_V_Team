@@ -27,7 +27,7 @@ _REQUIRED_INVOICE_LABELS: "set[str]" = {
 
 # Hint phân biệt trường dễ nhầm (nhãn thường → hint)
 _FIELD_HINTS: "dict[str, str]" = {
-    "số hoá đơn":      "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123' — KHÁC với Ký hiệu",
+    "số hoá đơn":      "Con số tuần tự trên hoá đơn, thường chỉ gồm chữ số như '0000123', '00007781'. Trên hoá đơn thường in là 'Số:' hoặc 'No.' — KHÁC với Ký hiệu",
     "ký hiệu hoá đơn": "Mã định danh mẫu/ký hiệu, thường dạng chữ+số như '1C25T', 'K25TSN' — KHÁC với Số hoá đơn",
 }
 

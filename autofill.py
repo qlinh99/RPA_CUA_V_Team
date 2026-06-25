@@ -244,9 +244,12 @@ def build_prompt(fields: "list[dict]", doc_text: "str | None") -> str:
     if is_invoice:
         p += (
             "\nLƯU Ý QUAN TRỌNG — Hoá đơn Việt Nam có HAI trường KHÁC NHAU:\n"
-            "• 'Số hoá đơn' = con số tuần tự thuần chữ số, ví dụ '0000123', '00001' — thường ở góc trên phải.\n"
-            "• 'Ký hiệu hoá đơn' = mã mẫu/series, thường gồm chữ cái và số, ví dụ '1C25T', 'K25TSN', '01GTKT0/001'.\n"
-            "TUYỆT ĐỐI không hoán đổi hai trường này. Nếu chỉ tìm thấy một giá trị, hãy xác định đúng nó là Số hay Ký hiệu trước khi gán.\n"
+            "• 'Số hoá đơn' = con số tuần tự THUẦN CHỮ SỐ như '0000123', '00007781'.\n"
+            "  Trên hoá đơn thường in ngắn gọn là 'Số:' hoặc 'No.' theo sau là con số đó.\n"
+            "• 'Ký hiệu hoá đơn' = mã mẫu/series gồm cả CHỮ CÁI VÀ SỐ như '1C25T', 'K25TSN', '1C26TML', '01GTKT0/001'.\n"
+            "  Trên hoá đơn thường in là 'Ký hiệu:' hoặc 'Series:' theo sau là mã đó.\n"
+            "QUY TẮC PHÂN BIỆT: nếu giá trị chỉ gồm chữ số → Số hoá đơn; nếu có cả chữ lẫn số → Ký hiệu.\n"
+            "TUYỆT ĐỐI không hoán đổi hai trường này. Nếu chỉ tìm thấy một giá trị, hãy xác định đúng loại trước khi gán.\n"
         )
     if doc_text is not None:
         p += f"\nNỘI DUNG VĂN BẢN CHỨNG TỪ:\n----------\n{doc_text}\n"
