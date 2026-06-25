@@ -1062,7 +1062,8 @@ class ChainOCRAdapter(OCRAdapter):
                 return result
             last = result
             name = adapter.__class__.__name__.replace("OCRAdapter", "")
-            print(f"⚠️  {name} thất bại ({result.get('error', '')[:80]}) — thử provider tiếp theo...")
+            print(f"⚠️  {name} lỗi: {result.get('error', '')[:80]}")
+            print(f"   🔀 ĐANG CHUYỂN sang dự phòng...")
         return last or self._err("Tất cả provider thất bại", n_images=len(images),
                                  image_sizes=image_sizes)
 
@@ -1092,9 +1093,10 @@ def create_ocr_adapter() -> OCRAdapter:
             raise ValueError("Thiếu GEMINI_API_KEY trong .env")
         openai_key = os.environ.get("OPENAI_API_KEY", "")
         if openai_key:
-            print("   ↩️  Fallback provider: OpenAI GPT-4o-mini")
-            gemini = GeminiOCRAdapter(api_key=key, retries=1)   # fail nhanh, OpenAI lo fallback
-            return ChainOCRAdapter(gemini, OpenAIOCRAdapter(api_key=openai_key, model="gpt-4o-mini"))
+            openai_model = os.environ.get("MODEL_OPENAI", "gpt-4o-mini")
+            print(f"   🔗 Dự phòng sẵn sàng: OpenAI {openai_model} (tự động dùng nếu Gemini lỗi)")
+            gemini = GeminiOCRAdapter(api_key=key, retries=1)
+            return ChainOCRAdapter(gemini, OpenAIOCRAdapter(api_key=openai_key, model=openai_model))
         return GeminiOCRAdapter(api_key=key)
 
     elif provider == "openai":
@@ -1104,7 +1106,7 @@ def create_ocr_adapter() -> OCRAdapter:
         gemini_key = os.environ.get("GEMINI_API_KEY", "")
         if gemini_key:
             gemini_model = os.environ.get("MODEL_GEMINI", "pro")
-            print(f"   ↩️  Fallback provider: Gemini {gemini_model}")
+            print(f"   🔗 Dự phòng sẵn sàng: Gemini {gemini_model} (tự động dùng nếu OpenAI lỗi)")
             return ChainOCRAdapter(
                 OpenAIOCRAdapter(api_key=key),
                 GeminiOCRAdapter(api_key=gemini_key, model=gemini_model),
