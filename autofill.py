@@ -287,16 +287,19 @@ def _normalize_record(raw: dict, fields: "list[dict]") -> "tuple[list, list]":
 
 def _extract_items(doc, fields: "list[dict]") -> "list[tuple[list, list]]":
     """OCR hoặc đọc dict → list[(items, issues)] — 1 phần tử nếu đơn bản ghi, N nếu nhiều.
-    doc: str đường dẫn file, hoặc dict dữ liệu đã đọc sẵn.
+    doc: str đường dẫn file.
     """
-    if isinstance(doc, dict):
-        raw = _map_raw_to_fields(doc, fields)
-        return [_normalize_record(raw, fields)]
     print(f"\n🧾 OCR chứng từ: {doc}")
     raws = extract_values(doc, fields)
     if len(raws) > 1:
         print(f"  📋 Tổng: {len(raws)} bản ghi trong chứng từ")
     return [_normalize_record(raw, fields) for raw in raws]
+
+
+def _remap_items(merged_items: "list[dict]", target_fields: "list[dict]") -> "list[dict]":
+    """Ánh xạ merged_items sang target_fields theo nhãn, giữ nguyên value đã trích xuất."""
+    val_by_label = {it["label"]: it["value"] for it in merged_items}
+    return [{**f, "value": val_by_label.get(f["label"])} for f in target_fields]
 
 
 def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
@@ -396,6 +399,67 @@ def run_access(args) -> int:
         print("\n✅ Đã điền vào form Access.")
         codes.append(0)
     print("Kiểm bảng HoaDon để đối chiếu.")
+    return 0 if all(c == 0 for c in codes) else 1
+
+
+def run_invoice(args) -> int:
+    """Excel + Access với 1 lần OCR duy nhất (tránh kết quả khác nhau giữa 2 đích)."""
+    from backends import desktop_filler, access_filler
+
+    # ── Thu thập fields từng đích ────────────────────────────────────
+    sheet_name, excel_fields = None, []
+    if args.excel:
+        print(f"\n📊 Báo cáo Excel: {args.excel}  (sheet: {args.sheet or 'mặc định'})")
+        sheet_name, excel_fields = excel_target.inspect_excel(
+            args.excel, args.sheet, args.header_row)
+        print(f"   Sheet '{sheet_name}'  ({len(excel_fields)} cột)")
+
+    access_fields = []
+    if args.access:
+        access_fields = desktop_filler.schema()
+        print(f"\n🗄️  Microsoft Access ({len(access_fields)} ô) — điền qua COM")
+
+    # ── Gộp fields theo nhãn → OCR 1 lần ───────────────────────────
+    seen, merged = set(), []
+    for f in excel_fields + access_fields:
+        if f["label"] not in seen:
+            merged.append(f)
+            seen.add(f["label"])
+
+    all_records = _extract_items(args.doc, merged)
+    n = len(all_records)
+
+    if not args.submit:
+        print(f"\n💡 Chưa ghi ({n} bản ghi). Thêm --submit để ghi vào các đích.")
+        return 0
+
+    # ── Ghi vào từng đích ───────────────────────────────────────────
+    codes = []
+    for i, (merged_items, _issues) in enumerate(all_records, 1):
+        if n > 1:
+            print(f"\n  ══ Bản ghi {i}/{n} ══")
+
+        if excel_fields:
+            xl_values = {it["id"]: it["value"]
+                         for it in _remap_items(merged_items, excel_fields)}
+            if args.watch:
+                from backends import excel_com
+                row = excel_com.append_row_visible(
+                    args.excel, args.sheet, args.header_row,
+                    excel_fields, xl_values, delay=0.6)
+            else:
+                row = excel_target.append_row(
+                    args.excel, args.sheet, args.header_row, excel_fields, xl_values)
+            print(f"\n✅ Excel: dòng {row} trong '{sheet_name}'")
+            codes.append(0)
+
+        if access_fields:
+            ac_values = {it["id"]: it["value"]
+                         for it in _remap_items(merged_items, access_fields)}
+            access_filler.fill_access(ac_values, submit=True)
+            print("\n✅ Access: Đã điền.")
+            codes.append(0)
+
     return 0 if all(c == 0 for c in codes) else 1
 
 

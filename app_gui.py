@@ -35,6 +35,8 @@ def build_args(target, doc, extra, submit, headed, watch=True) -> types.SimpleNa
 
 
 def dispatch(a) -> int:
+    if a.access and getattr(a, "excel", None):
+        return autofill.run_invoice(a)   # cả hai đích → OCR 1 lần
     if a.access:
         return autofill.run_access(a)
     if a.excel:
@@ -64,7 +66,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("RPA hoá đơn")
-        root.geometry("560x560")
+        root.geometry("560x520")
         root.attributes("-topmost", True)
         pad = {"padx": 10, "pady": 6}
 
@@ -85,20 +87,7 @@ class App:
         ttk.Entry(f1, textvariable=self.doc_var).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(f1, text="Chọn…", command=self.pick_doc).pack(side="left")
 
-        # ── 2) OCR Provider ─────────────────────────────────────────────
-        f2 = ttk.Frame(root); f2.pack(fill="x", padx=10, pady=(0, 4))
-        ttk.Label(f2, text="OCR Provider:").pack(side="left")
-        self.provider_var = tk.StringVar(
-            value=os.environ.get("OCR_PROVIDER", "openai").lower())
-        _providers = ["openai", "gemini", "claude", "ollama", "mock"]
-        ttk.Combobox(f2, textvariable=self.provider_var, values=_providers,
-                     width=10, state="readonly").pack(side="left", padx=6)
-        self._provider_hint = ttk.Label(f2, text="", foreground="#555")
-        self._provider_hint.pack(side="left")
-        self.provider_var.trace_add("write", self._on_provider_change)
-        self._on_provider_change()   # hiện hint lần đầu
-
-        # ── 3) Tab đích ─────────────────────────────────────────────────
+        # ── 2) Tab đích ─────────────────────────────────────────────────
         self.nb = ttk.Notebook(root)
         self.nb.pack(fill="x", **pad)
 
@@ -129,7 +118,7 @@ class App:
         self.headed = tk.BooleanVar(value=True)  # luôn hiện trình duyệt Form
         self.watch  = tk.BooleanVar(value=True)  # luôn mở Excel/Access xem điền
 
-        # ── 4) Nút hành động ────────────────────────────────────────────
+        # ── 3) Nút hành động ────────────────────────────────────────────
         f4 = ttk.Frame(root); f4.pack(fill="x", **pad)
         self.btn_prev = ttk.Button(f4, text="Xem trước nội dung",
                                    command=lambda: self.run(False))
@@ -138,7 +127,7 @@ class App:
                                  command=lambda: self.run(True))
         self.btn_go.pack(side="left", expand=True, fill="x", padx=4)
 
-        # ── 5) Log ──────────────────────────────────────────────────────
+        # ── 4) Log ──────────────────────────────────────────────────────
         self.log = tk.Text(root, height=16, state="disabled", wrap="word",
                            font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, **pad)
@@ -170,17 +159,6 @@ class App:
             filetypes=[("Excel", "*.xlsx *.xlsm"), ("Tất cả", "*.*")])
         if p:
             self.excel_path.set(p)
-
-    def _on_provider_change(self, *_):
-        hints = {
-            "openai":  "GPT-4o-mini  (cần OPENAI_API_KEY)",
-            "gemini":  "gemini-2.5-pro  (cần GEMINI_API_KEY)",
-            "claude":  "Claude Haiku  (cần ANTHROPIC_API_KEY)",
-            "ollama":  "LLaVA local  (cần ollama serve)",
-            "mock":    "giả lập — không gọi API",
-        }
-        self._provider_hint.configure(
-            text=hints.get(self.provider_var.get(), ""))
 
     def _on_doc_edit(self, *_):
         if not self._set_display:
@@ -225,15 +203,13 @@ class App:
                        "access": self.use_access.get()},
                       submit, self.headed.get(), self.watch.get())
 
-        provider = self.provider_var.get()
         self.btn_prev.configure(state="disabled")
         self.btn_go.configure(state="disabled")
         self.log.configure(state="normal"); self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        threading.Thread(target=self._worker, args=(docs, params, provider), daemon=True).start()
+        threading.Thread(target=self._worker, args=(docs, params), daemon=True).start()
 
-    def _worker(self, docs, params, provider):
-        os.environ["OCR_PROVIDER"] = provider   # áp dụng trước khi bất kỳ OCR call nào
+    def _worker(self, docs, params):
         target, extra, submit, headed, watch = params
         old = sys.stdout
         sys.stdout = TkWriter(self.log)
@@ -243,24 +219,27 @@ class App:
                 print(f"\n{'='*48}\n[{i}/{len(docs)}] {os.path.basename(doc)}\n{'='*48}")
 
                 if target == "invoice":
-                    rc_list = []
-                    if extra["excel"][0]:   # use_excel
-                        a = build_args("excel", doc, extra["excel"][1], submit, headed, watch)
-                        try:
-                            rc_list.append(dispatch(a))
-                        except Exception as e:
-                            import traceback
-                            print("\n⛔ LỖI Excel:", e, "\n", traceback.format_exc())
-                            rc_list.append(1)
-                    if extra["access"]:     # use_access
-                        a = build_args("access", doc, "", submit, headed, watch)
-                        try:
-                            rc_list.append(dispatch(a))
-                        except Exception as e:
-                            import traceback
-                            print("\n⛔ LỖI Access:", e, "\n", traceback.format_exc())
-                            rc_list.append(1)
-                    rc = 0 if rc_list and all(c == 0 for c in rc_list) else 1
+                    use_xl, xl_path = extra["excel"]
+                    use_ac = extra["access"]
+                    try:
+                        if use_xl and use_ac:
+                            # Cả hai đích → build_args excel rồi bật thêm access
+                            # dispatch() sẽ thấy excel+access và gọi run_invoice (OCR 1 lần)
+                            a = build_args("excel", doc, xl_path, submit, headed, watch)
+                            a.access = True
+                            rc = dispatch(a)
+                        elif use_xl:
+                            a = build_args("excel", doc, xl_path, submit, headed, watch)
+                            rc = dispatch(a)
+                        elif use_ac:
+                            a = build_args("access", doc, "", submit, headed, watch)
+                            rc = dispatch(a)
+                        else:
+                            rc = 0
+                    except Exception as e:
+                        import traceback
+                        print("\n⛔ LỖI:", e, "\n", traceback.format_exc())
+                        rc = 1
                 else:
                     a = build_args(target, doc, extra, submit, headed, watch)
                     try:
