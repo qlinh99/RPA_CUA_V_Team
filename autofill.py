@@ -28,12 +28,12 @@ import argparse
 import unicodedata
 from pathlib import Path
 
-from inspect_form import fetch_form
-from doc_reader import file_to_pages
-from test_image_processing import create_ocr_adapter
-from ocr_to_form import normalize_date
-import form_filler
-import excel_target
+from core.inspect_form import fetch_form
+from core.doc_reader import file_to_pages
+from core.ocr_engine import create_ocr_adapter
+from core.ocr_to_form import normalize_date
+from core import form_filler
+from backends import excel_target
 
 
 def _fid(f: dict) -> str:
@@ -303,7 +303,7 @@ def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
     """Gửi 1 bản ghi. browser: trình duyệt tái sử dụng (multi-record, None = tự tạo)."""
     pages = schema.get("pages", 1)
     if args.cua:
-        import cua_fallback
+        from backends import cua_fallback
         print("\n🤖 CUA Gemini điền form (nhìn pixel)...")
         if pages > 1:
             print("   ⚠️  CUA chưa điều hướng nhiều trang — chỉ điền trang 1.")
@@ -320,7 +320,7 @@ def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
     )
     if not res["ok"]:
         print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK CUA Gemini...")
-        import cua_fallback
+        from backends import cua_fallback
         res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
     print(res)
     return 0 if res["ok"] else 1
@@ -377,8 +377,7 @@ def run_form(args) -> int:
 
 
 def run_access(args) -> int:
-    import desktop_filler
-    import access_filler
+    from backends import desktop_filler, access_filler
     fields = desktop_filler.schema()
     print(f"\n🗄️  Microsoft Access ({len(fields)} ô) — điền qua COM")
     all_records = _extract_items(args.doc, fields)
@@ -416,7 +415,7 @@ def run_excel(args) -> int:
         values = {it["id"]: it["value"] for it in items}
         if args.watch:
             print("\n👁️  Mở Excel để xem điền trực tiếp (win32com)...")
-            import excel_com
+            from backends import excel_com
             row = excel_com.append_row_visible(args.excel, args.sheet, args.header_row,
                                                fields, values, delay=0.6)
         else:

@@ -16,15 +16,17 @@ Chạy:
 LƯU Ý: mỗi lần điền là 1 dòng THẬT nộp vào form. Sau đó dùng verify.py để lấy tỉ lệ verified.
 """
 from __future__ import annotations
-import _bootstrap
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import _bootstrap
 import glob
 import time
 import argparse
 import statistics as st
 
 import autofill
-import form_filler
+from core import form_filler
 
 
 def _fill(tier: str, schema: dict, items: list) -> bool:
@@ -35,7 +37,7 @@ def _fill(tier: str, schema: dict, items: list) -> bool:
                                                 headless=True, shot_name="bench")
         return r["ok"]
     if tier == "cua":
-        import cua_fallback
+        from backends import cua_fallback
         r = cua_fallback.cua_fill_web(schema["view_url"], items, headless=True)
         return r["ok"]
     raise ValueError(tier)

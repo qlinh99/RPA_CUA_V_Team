@@ -13,7 +13,7 @@ Trả về list các tuple:
 from __future__ import annotations
 from pathlib import Path
 
-from test_image_processing import process_image, prepare_for_api
+from .ocr_engine import process_image, prepare_for_api
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 CSV_EXT = {".csv", ".tsv"}

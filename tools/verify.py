@@ -16,17 +16,18 @@ Chạy:
   py -3.11 verify.py --responses "https://docs.google.com/.../export?format=csv"
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _bootstrap  # .env, sys.path
 import csv
 import io
-import sys
 import argparse
 import unicodedata
-from pathlib import Path
 
-from ocr_to_form import normalize_date, normalize_vat, normalize_amount
+from core.ocr_to_form import normalize_date, normalize_vat, normalize_amount
 
-DEFAULT_SOURCE = (Path(__file__).resolve().parent.parent /
+DEFAULT_SOURCE = (Path(__file__).resolve().parent.parent.parent /
                   "Interns_Assignment" / "intern_assignments" / "answer_key" / "ground_truth.csv")
 
 # (nhãn, cột nguồn ground_truth, nhãn cột trong responses, kiểu so sánh)

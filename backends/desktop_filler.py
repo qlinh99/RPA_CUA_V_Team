@@ -14,11 +14,31 @@ import os
 import re
 import time
 
-from zalo_demo import force_front, set_clipboard, read_value
+def force_front(dlg) -> None:
+    try:
+        dlg.set_focus()
+    except Exception:
+        pass
+
+
+def set_clipboard(text: str) -> None:
+    import win32clipboard  # type: ignore
+    win32clipboard.OpenClipboard()
+    win32clipboard.EmptyClipboard()
+    win32clipboard.SetClipboardText(str(text), win32clipboard.CF_UNICODETEXT)
+    win32clipboard.CloseClipboard()
+
+
+def read_value(ctrl) -> str:
+    try:
+        return ctrl.window_text() or ""
+    except Exception:
+        return ""
+
 
 # ====================== CẤU HÌNH APP ĐÍCH (SỬA Ở ĐÂY) ======================
 # Trỏ tới file .accdb → tự mở Access + form (FormHoaDon là StartUpForm).
-APP_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hoadon_demo.accdb")
+APP_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "hoadon_demo.accdb")
 WINDOW_TITLE = "Access"       # regex 1 phần tiêu đề cửa sổ đích
 
 # key | label (cho OCR) | name (UIA Name của ô) | type

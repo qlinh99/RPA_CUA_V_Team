@@ -7,9 +7,12 @@ Nhanh, ổn định. Đọc cấu hình trường từ form_config.py.
     submit_invoice(form_dict)
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import requests
 
-import form_config as cfg
+from . import form_config as cfg
 
 
 def _build_payload(inv: dict) -> dict:

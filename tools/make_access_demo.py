@@ -8,9 +8,12 @@ Chạy:  py -3.11 make_access_demo.py
 Sau đó soi form:  py -3.11 inspect_uia.py "FormHoaDon" --all   (hoặc "hoadon_demo")
 """
 import os
+import sys
 import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hoadon_demo.accdb")
+DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "hoadon_demo.accdb")
 
 # (cột trong bảng, kiểu Access, nhãn tiếng Việt trên form)
 COLS = [

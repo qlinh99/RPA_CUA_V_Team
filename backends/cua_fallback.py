@@ -16,7 +16,7 @@ import json
 import time
 from pathlib import Path
 
-from test_image_processing import create_ocr_adapter, prepare_for_api
+from core.ocr_engine import create_ocr_adapter, prepare_for_api
 
 VW, VH = 1280, 1600           # viewport CSS px (scale=1) -> map toạ độ chuẩn hoá 0-1000
 

@@ -14,8 +14,8 @@ import _bootstrap  # .env, temp->D:, sys.path
 import json
 import re
 
-from doc_reader import file_to_pages
-from test_image_processing import create_ocr_adapter
+from .doc_reader import file_to_pages
+from .ocr_engine import create_ocr_adapter
 
 DYNAMIC_PROMPT = (
     "Bạn là trợ lý trích xuất dữ liệu chứng từ. Hãy ĐỌC tài liệu và trả về DUY NHẤT một JSON "

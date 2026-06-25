@@ -15,18 +15,17 @@ CÁCH CHẠY (Python 3.11):
     # thêm --headed để XEM trình duyệt điền (chạy chậm)
 """
 from __future__ import annotations
-import _bootstrap  # PHẢI đứng đầu: temp sang D:, nạp .env, thêm sys.path
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import _bootstrap  # PHẢI đứng đầu: temp sang D:, nạp .env, thêm sys.path
 import json
 import re
-from pathlib import Path
 
-from test_image_processing import (
-    create_ocr_adapter, process_image, prepare_for_api, OCR_PROMPTS,
-)
-from ocr_to_form import to_form_dict
-from fill_invoice_form_playwright import submit_invoice_browser
-import form_config as cfg
+from core.ocr_engine import create_ocr_adapter, process_image, prepare_for_api, OCR_PROMPTS
+from core.ocr_to_form import to_form_dict
+from .fill_invoice_form_playwright import submit_invoice_browser
+from . import form_config as cfg
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 FORM_KEYS = [f["key"] for f in cfg.FIELDS]

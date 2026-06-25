@@ -7,12 +7,14 @@ Bậc 3 — điền Google Form bằng Playwright (trình duyệt thật) + scre
     submit_invoice_browser(form_dict, headless=False, slow_mo=700)
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _bootstrap  # PHẢI đứng đầu: temp sang D:, nạp .env, sys.path
 import time
 import unicodedata
-from pathlib import Path
 
-import form_config as cfg
+from . import form_config as cfg
 
 SHOT_DIR = _bootstrap.SCREENSHOT_DIR
 

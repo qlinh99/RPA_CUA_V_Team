@@ -11,7 +11,7 @@ import os
 import time
 from datetime import date, datetime
 
-from excel_target import _coerce
+from .excel_target import _coerce
 
 XL_UP = -4162  # hằng số xlUp của Excel (tìm dòng cuối có dữ liệu)
 

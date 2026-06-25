@@ -28,7 +28,7 @@ def build_args(target, doc, extra, submit, headed, watch=True) -> types.SimpleNa
     if target == "form":
         a.form = extra or None
     elif target == "excel":
-        a.excel = extra or os.path.join(HERE, "bao_cao.xlsx")
+        a.excel = extra or os.path.join(HERE, "data", "bao_cao.xlsx")
     elif target == "access":
         a.access = True
     return a
@@ -103,7 +103,7 @@ class App:
         row_xl = ttk.Frame(t1); row_xl.pack(fill="x", pady=(0, 4))
         self.use_excel = tk.BooleanVar(value=True)
         ttk.Checkbutton(row_xl, text="Ghi vào Excel:", variable=self.use_excel).pack(side="left")
-        self.excel_path = tk.StringVar(value=os.path.join(HERE, "bao_cao.xlsx"))
+        self.excel_path = tk.StringVar(value=os.path.join(HERE, "data", "bao_cao.xlsx"))
         ttk.Entry(row_xl, textvariable=self.excel_path).pack(
             side="left", fill="x", expand=True, padx=4)
         ttk.Button(row_xl, text="…", width=3, command=self._pick_excel).pack(side="left")

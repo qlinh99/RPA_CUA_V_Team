@@ -32,7 +32,7 @@ def fill_access(values_by_key: dict, *, form_name: "str | None" = None,
         exe = profile.get("exe", "")
         DB_PATH = exe if os.path.isabs(exe) else os.path.join(os.path.dirname(os.path.abspath(__file__)), exe)
     else:
-        from desktop_filler import FIELDS, APP_EXE
+        from .desktop_filler import FIELDS, APP_EXE
         fields, amount_keys, DB_PATH = FIELDS, AMOUNT_KEYS, APP_EXE
 
     acc = win32.Dispatch("Access.Application")       # tự mở/ tái dùng Access
