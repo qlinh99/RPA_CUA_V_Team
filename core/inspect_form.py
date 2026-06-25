@@ -21,6 +21,7 @@ import urllib.request
 TYPE_MAP = {
     0: "text", 1: "paragraph", 2: "radio", 3: "dropdown",
     4: "checkbox", 5: "scale", 7: "grid", 9: "date", 10: "time", 13: "file",
+    18: "scale",   # Rating (ngôi sao/icon) — render như scale, điền bằng radio
 }
 
 
@@ -59,13 +60,28 @@ def fetch_form(url: str):
             eid = f"entry.{e[0]}"
             required = bool(e[2]) if len(e) > 2 else False
             options = [o[0] for o in e[1]] if e[1] else None
-            out.append({
-                "label": name,
-                "type": TYPE_MAP.get(type_code, f"code{type_code}"),
-                "entry": eid,
-                "required": required,
-                "options": options,
-            })
+
+            if type_code == 7:
+                # Grid: mỗi entry là 1 dòng; nhãn dòng nằm ở e[3]
+                row_label_raw = e[3] if len(e) > 3 else None
+                row_label = (row_label_raw[0] if isinstance(row_label_raw, list) and row_label_raw
+                             else row_label_raw) if row_label_raw else None
+                out.append({
+                    "label": row_label or name,
+                    "type": "radio",          # mỗi dòng grid = radio selection
+                    "entry": eid,
+                    "required": required,
+                    "options": options,
+                    "grid_label": name,        # nhãn câu hỏi cha (để Playwright định vị đúng hàng)
+                })
+            else:
+                out.append({
+                    "label": name,
+                    "type": TYPE_MAP.get(type_code, f"code{type_code}"),
+                    "entry": eid,
+                    "required": required,
+                    "options": options,
+                })
     return title, out, view_url, pages
 
 

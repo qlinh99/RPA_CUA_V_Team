@@ -80,7 +80,13 @@ def _try_fill_field(page, item) -> bool:
                 if ti.count():
                     ti.first.fill(v)
         elif t in ("radio", "scale"):
-            q.get_by_role("radio", name=str(val), exact=True).click()
+            if item.get("grid_label"):
+                # Grid row: thu hẹp vào đúng radiogroup của hàng đó (tránh click hàng sai)
+                rg = q.locator("[role='radiogroup']").filter(has_text=_nfc(label))
+                ctx = rg.first if rg.count() else q
+            else:
+                ctx = q
+            ctx.get_by_role("radio", name=_nfc(str(val)), exact=True).click()
         elif t == "dropdown":
             q.get_by_role("listbox").first.click()
             page.get_by_role("option", name=str(val), exact=True).first.click()
