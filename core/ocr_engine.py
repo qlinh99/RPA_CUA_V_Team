@@ -1101,6 +1101,14 @@ def create_ocr_adapter() -> OCRAdapter:
         key = os.environ.get("OPENAI_API_KEY", "")
         if not key:
             raise ValueError("Thiếu OPENAI_API_KEY trong .env")
+        gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        if gemini_key:
+            gemini_model = os.environ.get("MODEL_GEMINI", "pro")
+            print(f"   ↩️  Fallback provider: Gemini {gemini_model}")
+            return ChainOCRAdapter(
+                OpenAIOCRAdapter(api_key=key),
+                GeminiOCRAdapter(api_key=gemini_key, model=gemini_model),
+            )
         return OpenAIOCRAdapter(api_key=key)
 
     elif provider == "claude":
