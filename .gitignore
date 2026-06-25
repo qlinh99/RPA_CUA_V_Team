@@ -21,3 +21,4 @@ bao_cao*.xlsx
 # OCR engine cache
 .ai-log/
 demo_*.xlsx
+data/~$bao_cao.xlsx
