@@ -81,12 +81,23 @@ def _try_fill_field(page, item) -> bool:
                     ti.first.fill(v)
         elif t in ("radio", "scale"):
             if item.get("grid_label"):
-                # Grid row: thu hẹp vào đúng radiogroup của hàng đó (tránh click hàng sai)
-                rg = q.locator("[role='radiogroup']").filter(has_text=_nfc(label))
-                ctx = rg.first if rg.count() else q
+                # Anchor vào listitem cha (grid_label) trước — ổn định hơn dùng label dòng
+                outer = page.locator("div[role='listitem']").filter(
+                    has_text=_nfc(item["grid_label"])).first
+                # Chiến lược 1: radiogroup[aria-label="<nhãn dòng>"]
+                rg = outer.locator(f'[role="radiogroup"][aria-label="{_nfc(label)}"]')
+                # Chiến lược 2: radiogroup chứa text nhãn dòng
+                if rg.count() == 0:
+                    rg = outer.locator("[role='radiogroup']").filter(has_text=_nfc(label))
+                ctx = rg.first if rg.count() else outer
             else:
                 ctx = q
-            ctx.get_by_role("radio", name=_nfc(str(val)), exact=True).click()
+            val_nfc = _nfc(str(val))
+            try:
+                ctx.get_by_role("radio", name=val_nfc, exact=True).first.click()
+            except Exception:
+                # aria-label Google Forms đôi khi thêm ngữ cảnh hàng: "Đúng, Hàng 1"
+                ctx.get_by_role("radio", name=val_nfc, exact=False).first.click()
         elif t == "dropdown":
             q.get_by_role("listbox").first.click()
             page.get_by_role("option", name=str(val), exact=True).first.click()
@@ -152,8 +163,27 @@ def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: boo
 
             remaining = [it for it in items if it.get("value") not in (None, "", [])]
             for pg in range(1, 21):
+                prev_len = len(remaining)
                 remaining = [it for it in remaining if not _try_fill_field(page, it)]
+                filled_now = prev_len - len(remaining)
                 submit_b, next_b = _find_nav(page)
+
+                # Trường nào có giá trị, locator thấy trên trang này, nhưng vẫn chưa điền
+                on_page_fail = [
+                    it for it in remaining
+                    if it.get("value") not in (None, "", [])
+                    and page.locator("div[role='listitem']").filter(
+                        has_text=_nfc(it["label"])).count() > 0
+                ]
+                pg_label = "Trước khi nộp" if submit_b else f"Trang {pg}"
+                if on_page_fail:
+                    print(f"   ⚠️  {pg_label}: {len(on_page_fail)} trường"
+                          f" thấy trên trang nhưng CHƯA ĐIỀN ĐƯỢC:")
+                    for it in on_page_fail:
+                        print(f"      • {it['label']!r}  ← {it['value']!r}")
+                elif filled_now:
+                    print(f"   ✅  {pg_label}: điền {filled_now} trường")
+
                 if submit_b:
                     submit_b.click()
                     break
