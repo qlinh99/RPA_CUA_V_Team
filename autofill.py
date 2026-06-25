@@ -233,9 +233,52 @@ _INV_FIELD_REGEXES: "list[tuple[str, list[str]]]" = [
 ]
 
 
+def _fix_invoice_swap(patched: dict, fields: "list[dict]") -> dict:
+    """Phát hiện LLM đặt nhầm Ký hiệu vào Số hoá đơn (hoặc ngược lại) và tự sửa.
+
+    Quy tắc hình thức:
+      • Số hoá đơn  = chuỗi THUẦN CHỮ SỐ  (không có ký tự a-z)
+      • Ký hiệu     = chuỗi CÓ ÍT NHẤT 1 chữ CÁI (A-Z)
+    """
+    so_fid = next((_fid(f) for f in fields
+                   if "số hoá đơn" in f["label"].lower()), None)
+    ky_fid = next((_fid(f) for f in fields
+                   if "ký hiệu" in f["label"].lower()), None)
+    if not so_fid or not ky_fid:
+        return patched
+
+    so_val = str(patched.get(so_fid) or "").strip()
+    ky_val = str(patched.get(ky_fid) or "").strip()
+
+    so_has_alpha  = bool(so_val and re.search(r"[A-Za-z]", so_val))
+    ky_only_digit = bool(ky_val and re.fullmatch(r"[\d\s]+", ky_val))
+
+    if so_has_alpha and ky_only_digit:
+        # Cả hai đều ở sai trường → hoán đổi hoàn toàn
+        patched[so_fid], patched[ky_fid] = ky_val, so_val
+        print(f"   🔄 Sửa hoán đổi: Số←'{ky_val}', Ký hiệu←'{so_val}'")
+    elif so_has_alpha and not ky_val:
+        # LLM để Ký hiệu vào Số hoá đơn, Ký hiệu bỏ trống
+        patched[ky_fid] = so_val
+        patched[so_fid] = None
+        print(f"   🔄 Sửa: '{so_val}' chuyển sang Ký hiệu (có chữ cái)")
+    elif so_has_alpha and so_val == ky_val:
+        # Cả hai trường giống nhau và đều là Ký hiệu → xoá Số hoá đơn
+        patched[so_fid] = None
+        print(f"   🔄 Sửa trùng: '{so_val}' giữ ở Ký hiệu, xoá khỏi Số hoá đơn")
+    elif ky_only_digit and not so_val:
+        # LLM để số tuần tự vào Ký hiệu, Số hoá đơn bỏ trống
+        patched[so_fid] = ky_val
+        patched[ky_fid] = None
+        print(f"   🔄 Sửa: '{ky_val}' chuyển sang Số hoá đơn (thuần chữ số)")
+
+    return patched
+
+
 def _regex_patch_invoice(raw: dict, doc_text: str, fields: "list[dict]") -> dict:
-    """Fallback: với trường nào LLM trả None, thử tìm bằng regex trong doc_text."""
-    patched = dict(raw)
+    """Bước 1: sửa hoán đổi Số/Ký hiệu do LLM.
+    Bước 2: fallback regex cho trường còn None."""
+    patched = _fix_invoice_swap(dict(raw), fields)
     for f in fields:
         fid = _fid(f)
         if patched.get(fid) not in (None, "", "null"):
