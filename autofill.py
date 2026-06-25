@@ -26,6 +26,7 @@ import json
 import hashlib
 import argparse
 import unicodedata
+import datetime as _dt
 from pathlib import Path
 
 from core.inspect_form import fetch_form
@@ -46,6 +47,23 @@ SUPPORTED = {"text", "paragraph", "date", "radio", "dropdown", "checkbox", "scal
 # nơi lưu schema form đã soi (đỡ phải soi lại mỗi lần)
 CACHE_DIR = Path(__file__).resolve().parent / "form_cache"
 LAST_FORM_FILE = CACHE_DIR / "_last_form.txt"   # nhớ form dùng gần nhất
+
+# ── Audit log ─────────────────────────────────────────────────────────────────
+_AUDIT_LOG = Path(__file__).resolve().parent / "reports" / "audit.log"
+
+
+def _audit_log(target: str, doc: str, ok: bool, detail: str = "") -> None:
+    """Ghi 1 dòng vào audit.log — không bao giờ raise exception."""
+    try:
+        _AUDIT_LOG.parent.mkdir(exist_ok=True)
+        ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "OK  " if ok else "FAIL"
+        name = Path(doc).name if doc else "?"
+        line = f"{ts} | {status} | {target:<10} | {name:<40} | {detail[:100]}\n"
+        with open(_AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def _cache_path(url: str) -> Path:
@@ -323,14 +341,29 @@ def _submit_form_record(schema: dict, items: list, args, browser=None) -> int:
     )
     if not res["ok"]:
         if browser is not None:
-            # shared browser đang chạy sync_playwright() — không thể lồng thêm
+            # shared browser đang có sync_playwright() → không thể lồng thêm
+            # Giải pháp: mở browser riêng tách biệt (browser=None tự tạo context mới)
             print(f"\n⚠️  Playwright thất bại ({res['error'][:60]})")
-            print("   ℹ️  Bỏ qua CUA fallback khi dùng shared browser (tái sử dụng trình duyệt)")
+            print("   🔄 Thử lại với browser riêng (tách khỏi shared context)...")
+            retry = form_filler.fill_and_submit_browser(
+                schema["view_url"], items,
+                headless=not args.headed,
+                slow_mo=200 if args.headed else 0,
+                shot_name=shot + "_retry",
+                browser=None,
+            )
+            if retry["ok"]:
+                res = retry
+            else:
+                print(f"   ⛔ Thử lại cũng thất bại: {retry['error'][:60]}")
         else:
             print(f"\n⚠️  Playwright thất bại ({res['error'][:60]}) → FALLBACK CUA Gemini...")
             from backends import cua_fallback
             res = cua_fallback.cua_fill_web(schema["view_url"], items, headless=not args.headed)
     print(res)
+    doc_name = getattr(args, "doc", "?")
+    _audit_log("gform", doc_name, res["ok"],
+               res.get("error", "") or f"screenshot={res.get('screenshot','')}")
     return 0 if res["ok"] else 1
 
 
@@ -400,9 +433,13 @@ def run_access(args) -> int:
             print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
             codes.append(2); continue
         values = {it["id"]: it["value"] for it in items}
-        access_filler.fill_access(values, submit=True)
-        print("\n✅ Đã điền vào form Access.")
-        codes.append(0)
+        out = access_filler.fill_access(values, submit=True)
+        ok_ac = bool(out)
+        print("\n✅ Đã điền vào form Access." if ok_ac
+              else "\n⚠️  Access: không có trường nào được ghi.")
+        _audit_log("access", args.doc, ok_ac,
+                   "" if ok_ac else "fill_access trả dict rỗng")
+        codes.append(0 if ok_ac else 1)
     print("Kiểm bảng HoaDon để đối chiếu.")
     return 0 if all(c == 0 for c in codes) else 1
 
@@ -440,9 +477,18 @@ def run_invoice(args) -> int:
 
     # ── Ghi vào từng đích ───────────────────────────────────────────
     codes = []
-    for i, (merged_items, _issues) in enumerate(all_records, 1):
+    for i, (merged_items, issues) in enumerate(all_records, 1):
         if n > 1:
             print(f"\n  ══ Bản ghi {i}/{n} ══")
+
+        # [X1] Không bỏ qua issues như trước (_issues) — chặn nếu có lỗi bắt buộc
+        if issues:
+            print(f"⛔ Bản ghi {i}: còn trường không hợp lệ — bỏ qua.")
+            for iss in issues:
+                print(f"   - {iss}")
+            _audit_log("invoice", args.doc, False, f"bản ghi {i}: {issues[0]}")
+            codes.append(2)
+            continue
 
         if excel_fields:
             xl_values = {it["id"]: it["value"]
@@ -456,14 +502,18 @@ def run_invoice(args) -> int:
                 row = excel_target.append_row(
                     args.excel, args.sheet, args.header_row, excel_fields, xl_values)
             print(f"\n✅ Excel: dòng {row} trong '{sheet_name}'")
+            _audit_log("excel", args.doc, True, f"dòng {row} / {sheet_name}")
             codes.append(0)
 
         if access_fields:
             ac_values = {it["id"]: it["value"]
                          for it in _remap_items(merged_items, access_fields)}
-            access_filler.fill_access(ac_values, submit=True)
-            print("\n✅ Access: Đã điền.")
-            codes.append(0)
+            out = access_filler.fill_access(ac_values, submit=True)
+            ok_ac = bool(out)
+            print("\n✅ Access: Đã điền." if ok_ac else "\n⚠️  Access: không có trường nào được ghi.")
+            _audit_log("access", args.doc, ok_ac,
+                       "" if ok_ac else "fill_access trả dict rỗng")
+            codes.append(0 if ok_ac else 1)
 
     return 0 if all(c == 0 for c in codes) else 1
 
@@ -490,6 +540,7 @@ def run_excel(args) -> int:
         else:
             row = excel_target.append_row(args.excel, args.sheet, args.header_row, fields, values)
         print(f"\n✅ Đã thêm vào dòng {row} của '{sheet_name}'")
+        _audit_log("excel", args.doc, True, f"dòng {row} / {sheet_name}")
         rows_added.append(row)
     if len(rows_added) > 1:
         print(f"\n✅ Tổng: {len(rows_added)} dòng thêm vào '{sheet_name}' trong {args.excel}")

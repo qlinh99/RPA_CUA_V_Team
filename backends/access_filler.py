@@ -64,7 +64,7 @@ def fill_access(values_by_key: dict, *, form_name: "str | None" = None,
     frm = acc.Forms(form_name)
     print(f"  📋 Form: {frm.Name}")
 
-    # NHẢY SANG BẢN GHI MỚI (trống) để THÊM mới, không sửa bản ghi cũ
+    # [A2] NHẢY SANG BẢN GHI MỚI — abort nếu thất bại để tránh ghi đè bản ghi cũ
     try:
         acc.DoCmd.SelectObject(2, frm.Name, False)   # acForm: đưa form thành active
     except Exception:
@@ -72,7 +72,8 @@ def fill_access(values_by_key: dict, *, form_name: "str | None" = None,
     try:
         acc.DoCmd.GoToRecord(-1, "", 5)              # acActiveDataObject, acNewRec=5 -> dòng mới
     except Exception as e:
-        print(f"  (không nhảy được sang bản ghi mới: {e})")
+        print(f"  ⛔ Không nhảy được sang bản ghi mới: {e} — DỪNG để tránh ghi đè.")
+        return {}
 
     out = {}
     for f in fields:
@@ -91,9 +92,48 @@ def fill_access(values_by_key: dict, *, form_name: "str | None" = None,
         try:
             acc.DoCmd.RunCommand(97)             # acCmdSaveRecord
             print("✅ Đã lưu bản ghi vào bảng HoaDon.")
+            # [A1] Xác nhận bản ghi đã INSERT vào bảng bằng cách query COUNT(*)
+            _verify_access_record(acc, values_by_key)
         except Exception as e:
             print(f"⚠️  Lưu bản ghi lỗi: {e}")
     return out
+
+
+def _verify_access_record(acc, values_by_key: dict) -> None:
+    """Query bảng để xác nhận bản ghi vừa lưu có thực sự tồn tại."""
+    so_hd = str(values_by_key.get("so_hoa_don") or "").strip()
+    if not so_hd:
+        return                                   # không có số hoá đơn → không query được
+    try:
+        db = acc.CurrentDb()
+        # Tìm tên bảng đầu tiên trong CSDL (thường là HoaDon)
+        tables = [db.TableDefs.Item(i).Name for i in range(db.TableDefs.Count)
+                  if not db.TableDefs.Item(i).Name.startswith("MSys")]
+        if not tables:
+            return
+        table = tables[0]
+        # Tìm cột chứa số hoá đơn (cột text đầu tiên)
+        td = db.TableDefs(table)
+        inv_col = None
+        for i in range(td.Fields.Count):
+            fn = td.Fields.Item(i).Name
+            if any(k in fn.lower() for k in ("sohoadon", "so_hoa_don", "invoice")):
+                inv_col = fn
+                break
+        if not inv_col:
+            return
+        rs = db.OpenRecordset(
+            f"SELECT COUNT(*) AS cnt FROM [{table}] WHERE [{inv_col}]='{so_hd}'"
+        )
+        cnt = rs.Fields("cnt").Value
+        rs.Close()
+        if cnt > 0:
+            print(f"   ✅ Xác nhận: tìm thấy {cnt} bản ghi trong [{table}]"
+                  f" ({inv_col}={so_hd!r}).")
+        else:
+            print(f"   ⚠️  acCmdSaveRecord OK nhưng KHÔNG thấy bản ghi trong [{table}]!")
+    except Exception as e:
+        print(f"   (không query bảng được để xác nhận: {e})")
 
 
 if __name__ == "__main__":

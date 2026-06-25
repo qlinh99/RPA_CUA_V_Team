@@ -23,6 +23,11 @@ def _guess_type(label: str) -> str:
     l = (label or "").lower()
     if any(k in l for k in ("ngày", "ngay", "date")):
         return "date"
+    # [E3] Nhận dạng cột số tiền → type "number" để _coerce chuyển đúng
+    if any(k in l for k in ("tiền", "tien", "thuế", "thue", "giá", "gia",
+                             "phí", "phi", "tổng", "tong", "amount",
+                             "price", "tax", "total")):
+        return "number"
     return "text"
 
 
@@ -58,6 +63,10 @@ def _coerce(value, ftype: str):
             except ValueError:
                 pass
         return value
+    # [E3] Cột số tiền: bỏ ký tự phân cách, giữ nguyên phần nguyên (VND không có thập phân)
+    if ftype == "number":
+        digits = re.sub(r"[^\d]", "", str(value))
+        return int(digits) if digits else None
     s = str(value)
     if re.fullmatch(r"\d{1,15}", s):
         # GIỮ text nếu có số 0 đứng đầu (số hoá đơn/MST) — tránh mất '0'
@@ -67,20 +76,64 @@ def _coerce(value, ftype: str):
     return value
 
 
+def _true_last_row(ws, header_row: int) -> int:
+    """Tìm dòng cuối thực sự có dữ liệu — scan ngược từ max_row qua TẤT CẢ cột."""
+    max_col = ws.max_column or 1
+    for r in range(ws.max_row, header_row, -1):
+        if any(ws.cell(row=r, column=c).value is not None
+               for c in range(1, max_col + 1)):
+            return r
+    return header_row
+
+
+def _find_inv_col(fields: "list[dict]") -> "int | None":
+    """Trả chỉ số cột có nhãn chứa 'số hoá đơn' / 'invoice' (dùng kiểm tra trùng)."""
+    for f in fields:
+        if any(k in f["label"].lower()
+               for k in ("số hoá đơn", "so hoa don", "invoice no", "invoice number")):
+            return f["col"]
+    return None
+
+
 def append_row(path: str, sheet: "str | None", header_row: int,
                fields: "list[dict]", values_by_id: dict) -> int:
     """Thêm 1 dòng mới ngay sau dữ liệu hiện có, ghi từng giá trị vào đúng cột."""
     from openpyxl import load_workbook
     wb = load_workbook(path)
     ws = wb[sheet] if sheet else wb.active
-    row = ws.max_row + 1
-    if row <= header_row:               # sheet mới chỉ có header
-        row = header_row + 1
+
+    # [E2] Tìm dòng cuối thực sự (scan tất cả cột, tránh max_row sai khi có ô trống)
+    row = _true_last_row(ws, header_row) + 1
+
+    # [E4] Kiểm tra trùng số hoá đơn trước khi ghi
+    inv_col = _find_inv_col(fields)
+    if inv_col:
+        inv_id = next((f["id"] for f in fields if f["col"] == inv_col), None)
+        inv_val = _coerce(values_by_id.get(inv_id, ""), "text") if inv_id else None
+        if inv_val:
+            for r_idx in range(header_row + 1, row):
+                if str(ws.cell(row=r_idx, column=inv_col).value or "") == str(inv_val):
+                    print(f"   ⚠️  TRÙNG: Số hoá đơn {inv_val!r} đã có ở dòng {r_idx}"
+                          f" — vẫn thêm dòng mới (kiểm tra lại nếu không muốn trùng)")
+                    break
+
     for f in fields:
         val = _coerce(values_by_id.get(f["id"]), f["type"])
         if val is not None:
             ws.cell(row=row, column=f["col"], value=val)
     wb.save(path)
+
+    # [E1] Read-back: xác nhận ô thực sự có dữ liệu sau khi save
+    wb_v = load_workbook(path, read_only=True, data_only=True)
+    ws_v = wb_v[ws.title]
+    null_fields = [f["label"] for f in fields
+                   if values_by_id.get(f["id"]) not in (None, "")
+                   and ws_v.cell(row=row, column=f["col"]).value is None]
+    wb_v.close()
+    if null_fields:
+        print(f"   ⚠️  Read-back: {len(null_fields)} ô ghi nhưng đọc lại null: "
+              + ", ".join(null_fields[:4]))
+
     return row
 
 

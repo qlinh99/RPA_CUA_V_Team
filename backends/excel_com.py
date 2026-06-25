@@ -31,7 +31,13 @@ def append_row_visible(path: str, sheet: "str | None", header_row: int,
         ws = wb.Worksheets(sheet) if sheet else wb.Worksheets(1)
         ws.Activate()
 
-        last = ws.Cells(ws.Rows.Count, 1).End(XL_UP).Row   # dòng cuối có dữ liệu (cột 1)
+        # [E5] Scan tối đa 5 cột đầu để tránh sai khi cột 1 có ô trống
+        used_cols = min(ws.UsedRange.Columns.Count, 5)
+        last = max(
+            (ws.Cells(ws.Rows.Count, c).End(XL_UP).Row
+             for c in range(1, used_cols + 1)),
+            default=header_row,
+        )
         row = max(last + 1, header_row + 1)
 
         for f in fields:

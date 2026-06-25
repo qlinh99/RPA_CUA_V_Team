@@ -183,7 +183,7 @@ def _confirm_submitted(page) -> "tuple[bool, str]":
     """Sau khi bấm Gửi: xác nhận đã sang trang phản hồi. Nếu chưa → bóc lỗi xác thực
     (tên ô bị 'không hợp lệ'/bắt buộc) để báo rõ vì sao form KHÔNG gửi được."""
     try:
-        page.wait_for_url(re.compile(r"formResponse"), timeout=12000)
+        page.wait_for_url(re.compile(r"formResponse"), timeout=20000)
         return True, ""
     except Exception:
         pass
@@ -261,6 +261,33 @@ def fill_and_submit_browser(form_url: str, items: "list[dict]", *, headless: boo
                     print(f"   ✅  {pg_label}: điền {filled_now} trường")
 
                 if submit_b:
+                    # [G1] Pre-submit DOM check: trường required nào chưa có giá trị?
+                    empty_req = page.evaluate("""() => {
+                        return [...document.querySelectorAll('div[role="listitem"]')]
+                            .filter(li => {
+                                const rg = li.querySelector('[role="radiogroup"]');
+                                if (rg) {
+                                    if (rg.getAttribute('aria-required') !== 'true') return false;
+                                    return ![...li.querySelectorAll('[role="radio"]')]
+                                        .some(r => r.getAttribute('aria-checked') === 'true');
+                                }
+                                const tb = li.querySelector('[role="textbox"]');
+                                if (tb && tb.getAttribute('aria-required') === 'true')
+                                    return !tb.value.trim();
+                                const inp = li.querySelector(
+                                    'input[type="date"], input[type="time"], input[type="text"]');
+                                if (inp && inp.getAttribute('aria-required') === 'true')
+                                    return !inp.value.trim();
+                                return false;
+                            })
+                            .map(li => li.textContent.trim()
+                                         .replace(/\\s+/g, ' ').slice(0, 60));
+                    }""")
+                    if empty_req:
+                        print(f"   ⚠️  PRE-SUBMIT DOM: {len(empty_req)} trường bắt buộc"
+                              f" chưa điền theo DOM:")
+                        for t in empty_req:
+                            print(f"      • {t!r}")
                     submit_b.click()
                     break
                 if next_b:
